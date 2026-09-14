@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+/* Color tokens. Dark is the default; light overrides via data-theme or system preference. */
+:root {
+  --bg: #0e1014;
+  --panel: #151820;
+  --panel-2: #1c2029;
+  --panel-3: #242935;
+  --line: #2a2f3b;
+  --fg: #e9ebf0;
+  --muted: #8c94a6;
+  --accent: #e4a93b;
+  --accent-fg: #1a1408;
+  --win: #4ade80;
+  --loss: #f87171;
+  --draw: #9aa4b8;
+  --glow: rgba(228, 169, 59, 0.08);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f5f1;
+  --panel: #ffffff;
+  --panel-2: #f1efe9;
+  --panel-3: #e7e4db;
+  --line: #dedbd1;
+  --fg: #1d1f24;
+  --muted: #6b7183;
+  --accent: #c98a15;
+  --accent-fg: #ffffff;
+  --win: #15803d;
+  --loss: #dc2626;
+  --draw: #64748b;
+  --glow: rgba(201, 138, 21, 0.1);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-win: var(--win);
+  --color-loss: var(--loss);
+  --color-draw: var(--draw);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-display: var(--font-fraunces), "Iowan Old Style", Georgia, serif;
+}
+
+/* Faint chessboard, for the hero and the TV header. */
+.board-texture {
+  background-image:
+    linear-gradient(45deg, var(--square) 25%, transparent 25%, transparent 75%, var(--square) 75%),
+    linear-gradient(45deg, var(--square) 25%, transparent 25%, transparent 75%, var(--square) 75%);
+  background-size: 56px 56px;
+  background-position:
+    0 0,
+    28px 28px;
+  --square: rgba(255, 255, 255, 0.025);
+}
+:root[data-theme="light"] .board-texture {
+  --square: rgba(0, 0, 0, 0.035);
+}
+/* Two-column page layouts: columns stretch to the same height, the last card of a column fills the rest. */
+.col-stack {
+  @apply flex flex-col gap-6 min-w-0;
+}
+.col-stack > :last-child {
+  @apply flex-1;
+}
+/* Mark one child .col-grow to make it take the slack instead of the last one. */
+.col-stack > .col-grow {
+  flex: 1 1 auto;
+}
+.col-stack:has(> .col-grow) > :last-child:not(.col-grow) {
+  flex: 0 0 auto;
+}
+.hairline {
+  background: linear-gradient(90deg, var(--accent), transparent);
+  height: 1px;
+}
+
+body {
+  background: radial-gradient(1200px 500px at 50% -200px, var(--glow), transparent 70%), var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+  @apply bg-panel-2 border border-line rounded-lg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  @apply h-4 w-4 accent-accent shrink-0;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium border border-line bg-panel-2 text-fg hover:bg-panel-3 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 whitespace-nowrap;
+}
+.btn-primary {
+  @apply bg-accent text-accent-fg border-accent hover:brightness-110;
+}
+.btn-danger {
+  @apply text-loss border-loss/30 hover:bg-loss/10;
+}
+.btn-ghost {
+  @apply border-transparent bg-transparent hover:bg-panel-2;
+}
+.btn-sm {
+  @apply px-2.5 py-1.5 text-xs rounded-md;
+}
+.btn-lg {
+  @apply px-5 py-3 text-base rounded-xl;
+}
+
+.card {
+  @apply bg-panel border border-line rounded-2xl p-5;
+}
+.card-title {
+  @apply font-display font-semibold text-lg tracking-tight flex items-center gap-2;
+}
+
+.table {
+  @apply w-full text-sm;
+}
+.table th {
+  @apply text-left text-[11px] uppercase tracking-wider text-muted font-medium py-2.5 px-4 border-b border-line whitespace-nowrap;
+}
+.table .nowrap {
+  @apply whitespace-nowrap;
+}
+.table td {
+  @apply py-2.5 px-4 border-b border-line/50;
+}
+.table tr:last-child td {
+  @apply border-b-0;
+}
+.table-compact th,
+.table-compact td {
+  @apply py-1.5 px-2;
+}
+
+.label {
+  @apply block text-[11px] uppercase tracking-wider text-muted mb-1.5 font-medium;
+}
+
+.badge {
+  @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border whitespace-nowrap;
+}
+
+.chip {
+  @apply flex items-center gap-2 text-sm rounded-lg border border-line bg-panel-2 px-3 py-2 cursor-pointer select-none transition-colors hover:border-muted/60 has-checked:border-accent/60 has-checked:bg-accent/10 has-disabled:opacity-60 has-disabled:cursor-default;
+}
+
+.stat {
+  @apply bg-panel border border-line rounded-2xl px-5 py-4 flex flex-col gap-1;
+}
+.stat-value {
+  @apply text-2xl font-semibold tracking-tight font-mono;
+}
+.stat-label {
+  @apply text-[11px] uppercase tracking-wider text-muted;
+}
+
+.scroll-x {
+  @apply overflow-x-auto;
+}
+
+.kbd {
+  @apply font-mono text-[10px] px-1 py-0.5 rounded border border-line bg-panel-2 text-muted;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-up {
+  animation: fade-up 0.25s ease-out both;
+}
+
+@media print {
+  header,
+  footer,
+  form,
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .card {
+    border-color: #ccc;
+    break-inside: avoid;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}
