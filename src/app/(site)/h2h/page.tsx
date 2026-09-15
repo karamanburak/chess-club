@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
 import { formatDateTime, headToHead, leaderboard, playerMap, resultLabel } from "@/lib/queries";
 import { Avatar, ColorDot, Empty, PageHeader, PlayerLink, Section } from "@/components/ui";
 
@@ -7,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
   const sp = await searchParams;
+  const { t, lang } = await getT();
   const db = await readDb();
   const names = playerMap(db);
   const players = leaderboard(db, true);
@@ -20,11 +23,11 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
 
   return (
     <>
-      <PageHeader eyebrow="Rivalry" title="Head-to-head" subtitle={<span>Pick two players to compare their record against each other.</span>} />
+      <PageHeader eyebrow={t.players.h2h.eyebrow} title={t.players.h2h.title} subtitle={<span>{t.players.h2h.subtitle}</span>} />
 
       <form method="get" className="card flex flex-wrap items-end gap-3 mb-6">
         <div className="flex-1 min-w-40">
-          <label className="label">Player A</label>
+          <label className="label">{t.players.h2h.playerA}</label>
           <select name="a" defaultValue={a} className="w-full">
             {players.map((p) => (
               <option key={p.id} value={p.id}>
@@ -33,9 +36,9 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
             ))}
           </select>
         </div>
-        <span className="text-muted pb-2">vs</span>
+        <span className="text-muted pb-2">{t.players.h2h.vs}</span>
         <div className="flex-1 min-w-40">
-          <label className="label">Player B</label>
+          <label className="label">{t.players.h2h.playerB}</label>
           <select name="b" defaultValue={b} className="w-full">
             {players.map((p) => (
               <option key={p.id} value={p.id}>
@@ -44,16 +47,16 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
             ))}
           </select>
         </div>
-        <button className="btn btn-primary">Compare</button>
+        <button className="btn btn-primary">{t.players.h2h.compare}</button>
       </form>
 
       {!h || !pa || !pb ? (
         <div className="card">
-          <Empty icon="⚔" title="Need two players" />
+          <Empty icon="swords" title={t.players.h2h.needTwo} />
         </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
-          <Section title="Record">
+          <Section title={t.players.h2h.record}>
             <div className="flex items-center justify-between gap-4 mb-4">
               <div className="flex flex-col items-center gap-2 flex-1">
                 <Avatar id={pa.id} name={pa.name} size="lg" />
@@ -69,7 +72,7 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
                   <span className="text-loss">{h.bWins}</span>
                 </div>
                 <div className="text-xs text-muted mt-1">
-                  {total} game{total === 1 ? "" : "s"} · {h.aPoints} : {h.bPoints}
+                  {plural(total, t.common.gamesN)} · {h.aPoints} : {h.bPoints}
                 </div>
               </div>
               <div className="flex flex-col items-center gap-2 flex-1">
@@ -87,29 +90,29 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
             )}
             <div className="mt-4 text-sm text-muted">
               {total === 0
-                ? "They have not played each other yet."
+                ? t.players.h2h.notPlayed
                 : h.aWins === h.bWins
-                  ? "Dead even."
-                  : `${h.aWins > h.bWins ? pa.name : pb.name} leads by ${Math.abs(h.aWins - h.bWins)}.`}{" "}
-              Rating gap: <span className="font-mono">{Math.abs(pa.rating - pb.rating)}</span>.
+                  ? t.players.h2h.deadEven
+                  : fmt(t.players.h2h.leadsBy, { name: h.aWins > h.bWins ? pa.name : pb.name, n: Math.abs(h.aWins - h.bWins) })}{" "}
+              {t.players.h2h.ratingGap} <span className="font-mono">{Math.abs(pa.rating - pb.rating)}</span>.
             </div>
           </Section>
 
-          <Section title="Games between them" flush>
+          <Section title={t.players.h2h.gamesBetween} flush>
             {h.games.length === 0 ? (
-              <Empty icon="♟" title="No games yet">
+              <Empty icon="pawn" title={t.players.h2h.noGames}>
                 <Link href="/pairing" className="text-accent hover:underline">
-                  Start a club night
+                  {t.players.h2h.startNight}
                 </Link>{" "}
-                and see who wins.
+                {t.players.h2h.seeWhoWins}
               </Empty>
             ) : (
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Date</th>
+                    <th>{t.players.h2h.date}</th>
                     <th>{pa.name}</th>
-                    <th className="text-center">Result</th>
+                    <th className="text-center">{t.common.result}</th>
                     <th>{pb.name}</th>
                   </tr>
                 </thead>
@@ -119,7 +122,7 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
                     const sa = g.result ? (aWhite ? (g.result === "1-0" || g.result === "+/-" ? 1 : g.result === "1/2-1/2" ? 0.5 : 0) : g.result === "0-1" || g.result === "-/+" ? 1 : g.result === "1/2-1/2" ? 0.5 : 0) : null;
                     return (
                       <tr key={g.id}>
-                        <td className="text-xs text-muted whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt)}</td>
+                        <td className="text-xs text-muted whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
                         <td className={sa === 1 ? "font-semibold text-win" : sa === 0 ? "text-muted" : ""}>
                           <span className="inline-flex items-center gap-2">
                             <ColorDot color={aWhite ? "white" : "black"} /> {aWhite ? g.whiteRatingBefore : g.blackRatingBefore}

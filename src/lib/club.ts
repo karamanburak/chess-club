@@ -1,3 +1,4 @@
+import { fmt, plural, type Dict } from "./i18n";
 /**
  * The "club life" layer: titles by rating band, achievements, seasons with
  * their own table and champion, tournament winners and home-page highlights.
@@ -193,7 +194,7 @@ export function tournamentWinner(db: Database, t: Tournament): TournamentWinner 
   if (t.status !== "finished" || !t.rounds.length) return null;
   if (t.pairingMode === "knockout") {
     const placed = knockoutPlacement(db, t);
-    const first = placed.find((p) => p.place === 1 && p.label === "Champion");
+    const first = placed.find((p) => p.place === 1); // label is localized, place is not
     if (!first) return null;
     return { tournament: t, playerId: first.playerId, runnerUpId: placed.find((p) => p.place === 2)?.playerId ?? null };
   }
@@ -216,6 +217,22 @@ export function tournamentWinners(db: Database): TournamentWinner[] {
 
 export function currentSeason(db: Database): Season | null {
   return db.seasons.find((s) => s.end === null) ?? null;
+}
+
+/**
+ * A season that has run past the calendar year it started in (or for more than a year) is
+ * probably just forgotten: the admin should close it so the champion gets crowned.
+ * Returns the number of months it has been running, or null when it is fine.
+ */
+export function seasonOverdue(season: Season, today = new Date().toISOString().slice(0, 10)): number | null {
+  if (season.end) return null;
+  const startYear = Number(season.start.slice(0, 4));
+  const todayYear = Number(today.slice(0, 4));
+  const months = (todayYear - startYear) * 12 + (Number(today.slice(5, 7)) - Number(season.start.slice(5, 7)));
+  // Grace period: a season started in December may legitimately run into January.
+  if (todayYear > startYear && months >= 2) return months;
+  if (months >= 12) return months;
+  return null;
 }
 
 export interface SeasonRow {
@@ -303,6 +320,9 @@ export function monthChampions(db: Database, minGames = 3): MonthChampion[] {
 /* Highlights for the home page                                        */
 /* ------------------------------------------------------------------ */
 
+import { club as clubMessages } from "./i18n/messages/club";
+const DEFAULT_HIGHLIGHT_MSGS = clubMessages.en.highlights;
+
 export interface Highlight {
   key: string;
   icon: string;
@@ -313,7 +333,7 @@ export interface Highlight {
 }
 
 /** What happened lately, in a handful of lines. */
-export function highlights(db: Database, days = 14): Highlight[] {
+export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"] = DEFAULT_HIGHLIGHT_MSGS): Highlight[] {
   const since = new Date(Date.now() - days * 86400_000).toISOString();
   const recent = db.games.filter((g): g is Game & { completedAt: string } => countsForRating(g) && g.completedAt >= since);
   const name = (id: string) => db.players.find((p) => p.id === id)?.name ?? "?";
@@ -339,7 +359,7 @@ export function highlights(db: Database, days = 14): Highlight[] {
     }
   }
   if (upset) {
-    out.push({ key: "upset", icon: "⚡", title: "Upset of the fortnight", text: `${name(upset.winner)} beat ${name(upset.loser)}, rated ${upset.diff} points higher.`, playerId: upset.winner, gameId: upset.g.id });
+    out.push({ key: "upset", icon: "⚡", title: m.upsetTitle, text: fmt(m.upsetText, { winner: name(upset.winner), loser: name(upset.loser), diff: upset.diff }), playerId: upset.winner, gameId: upset.g.id });
   }
   let hot: { id: string; length: number } | null = null;
   for (const p of db.players) {
@@ -347,22 +367,24 @@ export function highlights(db: Database, days = 14): Highlight[] {
     const s = streaks(db, p.id).current;
     if (s && s.kind === "W" && s.length >= 3 && (!hot || s.length > hot.length)) hot = { id: p.id, length: s.length };
   }
-  if (hot) out.push({ key: "hot", icon: "🔥", title: "Hot streak", text: `${name(hot.id)} has won ${hot.length} in a row.`, playerId: hot.id });
+  if (hot) out.push({ key: "hot", icon: "🔥", title: m.hotTitle, text: fmt(m.hotText, { name: name(hot.id), n: hot.length }), playerId: hot.id });
 
   const climber = [...gain.entries()].filter(([, v]) => v >= 30).sort((a, b) => b[1] - a[1])[0];
-  if (climber) out.push({ key: "climber", icon: "📈", title: "Climber", text: `${name(climber[0])} gained ${climber[1]} rating points in ${days} days.`, playerId: climber[0] });
+  if (climber) out.push({ key: "climber", icon: "📈", title: m.climberTitle, text: fmt(m.climberText, { name: name(climber[0]), n: climber[1], days }), playerId: climber[0] });
 
   const busiest = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
-  if (busiest && busiest[1] >= 3) out.push({ key: "busiest", icon: "♟", title: "Most active", text: `${name(busiest[0])} played ${busiest[1]} games in ${days} days.`, playerId: busiest[0] });
+  if (busiest && busiest[1] >= 3) out.push({ key: "busiest", icon: "♟", title: m.busiestTitle, text: fmt(m.busiestText, { name: name(busiest[0]), n: busiest[1], days }), playerId: busiest[0] });
 
   const newcomer = db.players.filter((p) => p.createdAt >= since && p.gamesPlayed > 0).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  if (newcomer) out.push({ key: "newcomer", icon: "👋", title: "New face", text: `${newcomer.name} joined and has already played ${newcomer.gamesPlayed} game${newcomer.gamesPlayed === 1 ? "" : "s"}.`, playerId: newcomer.id });
+  if (newcomer) out.push({ key: "newcomer", icon: "👋", title: m.newcomerTitle, text: fmt(plural(newcomer.gamesPlayed, m.newcomerText), { name: newcomer.name }), playerId: newcomer.id });
 
   const season = currentSeason(db);
   if (season) {
     const table = seasonTable(db, season);
     if (table.length >= 2 && table[0].points - table[1].points <= 1 && table[0].games >= 3) {
-      out.push({ key: "race", icon: "🏁", title: `${season.name} race`, text: `${name(table[0].playerId)} leads ${name(table[1].playerId)} by ${table[0].points - table[1].points === 0 ? "nothing" : `${table[0].points - table[1].points} point${table[0].points - table[1].points === 1 ? "" : "s"}`}.`, playerId: table[0].playerId });
+      const gap = table[0].points - table[1].points;
+      const vars = { leader: name(table[0].playerId), second: name(table[1].playerId) };
+      out.push({ key: "race", icon: "🏁", title: fmt(m.raceTitle, { season: season.name }), text: gap === 0 ? fmt(m.raceTextTied, vars) : fmt(plural(gap, m.raceText), vars), playerId: table[0].playerId });
     }
   }
   return out.slice(0, 5);

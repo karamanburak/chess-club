@@ -92,90 +92,98 @@ body {
   font-family: var(--font-sans);
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
-select,
-textarea {
-  @apply bg-panel-2 border border-line rounded-lg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20;
-}
-input[type="checkbox"],
-input[type="radio"] {
-  @apply h-4 w-4 accent-accent shrink-0;
-}
+/* Component classes live in the components layer so Tailwind utilities on the same element win (e.g. `btn w-full`, `btn text-base`). */
+@layer components {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea {
+    @apply bg-panel-2 border border-line rounded-lg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    @apply h-4 w-4 accent-accent shrink-0;
+  }
 
-.btn {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium border border-line bg-panel-2 text-fg hover:bg-panel-3 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 whitespace-nowrap;
-}
-.btn-primary {
-  @apply bg-accent text-accent-fg border-accent hover:brightness-110;
-}
-.btn-danger {
-  @apply text-loss border-loss/30 hover:bg-loss/10;
-}
-.btn-ghost {
-  @apply border-transparent bg-transparent hover:bg-panel-2;
-}
-.btn-sm {
-  @apply px-2.5 py-1.5 text-xs rounded-md;
-}
-.btn-lg {
-  @apply px-5 py-3 text-base rounded-xl;
-}
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium border border-line bg-panel-2 text-fg hover:bg-panel-3 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 whitespace-nowrap;
+  }
+  .btn-primary {
+    /* hover:bg-accent repeats the background so .btn:hover (same specificity, earlier) cannot swap it for panel-3 under the light text */
+    @apply bg-accent text-accent-fg border-accent hover:bg-accent hover:brightness-110;
+  }
+  .btn-danger {
+    @apply bg-transparent text-loss border-loss/30 hover:bg-loss/10;
+  }
+  /* Armed state of ConfirmButton: solid red, white text in both themes. */
+  .btn-confirm {
+    @apply bg-loss border-loss text-white hover:bg-loss hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-panel-2;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs rounded-md;
+  }
+  .btn-lg {
+    @apply px-5 py-3 text-base rounded-xl;
+  }
 
-.card {
-  @apply bg-panel border border-line rounded-2xl p-5;
-}
-.card-title {
-  @apply font-display font-semibold text-lg tracking-tight flex items-center gap-2;
-}
+  .card {
+    @apply bg-panel border border-line rounded-2xl p-5;
+  }
+  .card-title {
+    @apply font-display font-semibold text-lg tracking-tight flex items-center gap-2;
+  }
 
-.table {
-  @apply w-full text-sm;
-}
-.table th {
-  @apply text-left text-[11px] uppercase tracking-wider text-muted font-medium py-2.5 px-4 border-b border-line whitespace-nowrap;
-}
-.table .nowrap {
-  @apply whitespace-nowrap;
-}
-.table td {
-  @apply py-2.5 px-4 border-b border-line/50;
-}
-.table tr:last-child td {
-  @apply border-b-0;
-}
-.table-compact th,
-.table-compact td {
-  @apply py-1.5 px-2;
-}
+  .table {
+    @apply w-full text-sm;
+  }
+  .table th {
+    @apply text-left text-[11px] uppercase tracking-wider text-muted font-medium py-2.5 px-4 border-b border-line whitespace-nowrap;
+  }
+  .table .nowrap {
+    @apply whitespace-nowrap;
+  }
+  .table td {
+    @apply py-2.5 px-4 border-b border-line/50;
+  }
+  .table tr:last-child td {
+    @apply border-b-0;
+  }
+  .table-compact th,
+  .table-compact td {
+    @apply py-1.5 px-2;
+  }
 
-.label {
-  @apply block text-[11px] uppercase tracking-wider text-muted mb-1.5 font-medium;
-}
+  .label {
+    @apply block text-[11px] uppercase tracking-wider text-muted mb-1.5 font-medium;
+  }
 
-.badge {
-  @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border whitespace-nowrap;
-}
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border whitespace-nowrap;
+  }
 
-.chip {
-  @apply flex items-center gap-2 text-sm rounded-lg border border-line bg-panel-2 px-3 py-2 cursor-pointer select-none transition-colors hover:border-muted/60 has-checked:border-accent/60 has-checked:bg-accent/10 has-disabled:opacity-60 has-disabled:cursor-default;
-}
+  .chip {
+    @apply flex items-center gap-2 text-sm rounded-lg border border-line bg-panel-2 px-3 py-2 cursor-pointer select-none transition-colors hover:border-muted/60 has-checked:border-accent/60 has-checked:bg-accent/10 has-disabled:opacity-60 has-disabled:cursor-default;
+  }
 
-.stat {
-  @apply bg-panel border border-line rounded-2xl px-5 py-4 flex flex-col gap-1;
-}
-.stat-value {
-  @apply text-2xl font-semibold tracking-tight font-mono;
-}
-.stat-label {
-  @apply text-[11px] uppercase tracking-wider text-muted;
-}
+  .stat {
+    @apply bg-panel border border-line rounded-2xl px-5 py-4 flex flex-col gap-1;
+  }
+  .stat-value {
+    @apply text-2xl font-semibold tracking-tight font-mono;
+  }
+  .stat-label {
+    @apply text-[11px] uppercase tracking-wider text-muted;
+  }
 
-.scroll-x {
-  @apply overflow-x-auto;
-}
+  .scroll-x {
+    @apply overflow-x-auto;
+  }
 
-.kbd {
-  @apply font-mono text-[10px] px-1 py-0.5 rounded border border-line bg-panel-2 text-muted;
+  .kbd {
+    @apply font-mono text-[10px] px-1 py-0.5 rounded border border-line bg-panel-2 text-muted;
+  }
 }
 
 @keyframes fade-up {
@@ -190,6 +198,23 @@ input[type="radio"] {
 }
 .fade-up {
   animation: fade-up 0.25s ease-out both;
+}
+/* A board locking in during the pairing draw (PairingReveal). */
+@keyframes reveal-pop {
+  0% {
+    transform: scale(0.96);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  40% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: none;
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+.reveal-pop {
+  animation: reveal-pop 0.55s ease-out both;
 }
 
 @media print {

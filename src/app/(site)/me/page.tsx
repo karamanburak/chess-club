@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { readDb } from "@/lib/db";
 import { currentPlayerId } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt } from "@/lib/i18n";
 import { claimWithPin, registerSelf, skipIdentity } from "@/lib/actions";
 import { pinLocked } from "@/lib/pin";
 import { leaderboard } from "@/lib/queries";
@@ -11,26 +13,20 @@ import { Empty, PageHeader, Section } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-const ERRORS: Record<string, string> = {
-  short: "A PIN is exactly 4 digits.",
-  mismatch: "The two PINs do not match. Try again.",
-  wrong: "Wrong PIN. Five wrong tries in a row lock it for ten minutes.",
-  locked: "Too many wrong tries. Wait ten minutes or ask the admin for a new PIN.",
-};
-
 /**
  * "Who are you?": pick your face, prove it with your PIN, and this device
  * remembers you. No accounts, no passwords, nothing to register.
  */
 export default async function MePage({ searchParams }: PageProps<"/me">) {
   const sp = await searchParams;
+  const { t } = await getT();
   const db = await readDb();
   const next = typeof sp.next === "string" && sp.next.startsWith("/") ? sp.next : "";
   const chosenId = typeof sp.player === "string" ? sp.player : null;
   const chosen = chosenId ? db.players.find((p) => p.id === chosenId) : undefined;
   const me = await currentPlayerId();
   if (chosen && me === chosen.id) redirect(next || `/players/${chosen.id}`);
-  const error = typeof sp.error === "string" ? ERRORS[sp.error] : undefined;
+  const error = typeof sp.error === "string" ? t.me.errors[sp.error as keyof typeof t.me.errors] : undefined;
 
   if (chosen) {
     const firstTime = !chosen.pinHash;
@@ -40,7 +36,7 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
         <PageHeader
           eyebrow={
             <Link href="/me" className="hover:text-fg">
-              ← Not you? Pick again
+              {t.me.notYou}
             </Link>
           }
           title={
@@ -50,30 +46,26 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
             </span>
           }
         />
-        <Section title={firstTime ? "Choose your PIN" : "Enter your PIN"}>
+        <Section title={firstTime ? t.me.choosePin : t.me.enterPin}>
           <form action={claimWithPin} className="flex flex-col gap-3">
             <input type="hidden" name="playerId" value={chosen.id} />
             {next && <input type="hidden" name="next" value={next} />}
-            <p className="text-sm text-muted">
-              {firstTime
-                ? "Nobody has claimed this profile yet. Pick four digits; you will need them to claim it again on another device. Only you and the admin can touch this profile afterwards."
-                : "Four digits, set when this profile was first claimed. Forgot it? The admin can set a new one for you."}
-            </p>
+            <p className="text-sm text-muted">{firstTime ? t.me.firstTimeHint : t.me.returningHint}</p>
             {error && <p className="text-sm text-loss">{error}</p>}
             <div className={`grid gap-3 ${firstTime ? "grid-cols-2" : "grid-cols-1"}`}>
               <div>
-                <label className="label">{firstTime ? "PIN" : "Your PIN"}</label>
+                <label className="label">{firstTime ? t.me.pin : t.me.yourPin}</label>
                 <input name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoFocus autoComplete="off" disabled={locked} className="w-full font-mono text-center text-2xl tracking-[0.5em]" />
               </div>
               {firstTime && (
                 <div>
-                  <label className="label">Repeat</label>
+                  <label className="label">{t.me.repeat}</label>
                   <input name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center text-2xl tracking-[0.5em]" />
                 </div>
               )}
             </div>
-            <SubmitButton pendingText="Checking…" disabled={locked}>
-              {firstTime ? "Set PIN and continue" : "This is me"}
+            <SubmitButton pendingText={t.me.checking} disabled={locked}>
+              {firstTime ? t.me.setPinContinue : t.me.thisIsMe}
             </SubmitButton>
           </form>
         </Section>
@@ -86,66 +78,66 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
   return (
     <>
       <PageHeader
-        eyebrow={`Welcome to ${db.settings.club.name}`}
-        title="Who are you?"
-        subtitle={<span>Pick your face once and this device remembers you for a year. Your PIN keeps everyone else out of your profile.</span>}
+        eyebrow={fmt(t.me.welcome, { club: db.settings.club.name })}
+        title={t.me.whoAreYou}
+        subtitle={<span>{t.me.pickSubtitle}</span>}
         actions={
           <form action={skipIdentity}>
             <input type="hidden" name="next" value={next || "/"} />
             <SubmitButton className="btn btn-ghost" pendingText="…">
-              Just browsing →
+              {t.me.justBrowsing}
             </SubmitButton>
           </form>
         }
       />
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-        <Section title="I am on the list" flush>
+        <Section title={t.me.onTheList} flush>
           {players.length === 0 ? (
-            <Empty icon="♟" title="Nobody here yet">Be the first: join on the right.</Empty>
+            <Empty icon="pawn" title={t.me.nobodyYet}>{t.me.beFirst}</Empty>
           ) : (
             <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-5 p-4">
               {players.map((p) => (
                 <Link key={p.id} href={`/me?player=${p.id}${nextQ}`} className="rounded-xl border border-line bg-panel-2/40 flex flex-col items-center gap-2 py-4 px-2 hover:border-accent/60 hover:bg-accent/5 transition-colors text-center">
                   <FaceSvg seed={p.avatar} title={p.name} className="h-16 w-16 rounded-full ring-1 ring-line/70" />
                   <span className="text-sm font-medium truncate max-w-full">{p.name}</span>
-                  <span className="text-[10px] text-muted">{p.pinHash ? "PIN set" : "not claimed yet"}</span>
+                  <span className="text-[10px] text-muted">{p.pinHash ? t.me.pinSet : t.me.notClaimed}</span>
                 </Link>
               ))}
             </div>
           )}
         </Section>
         <div className="col-stack">
-          <Section title="I am new · join the club">
+          <Section title={t.me.newJoin}>
             <form action={registerSelf} className="flex flex-col gap-3">
               <div>
                 <label className="label" htmlFor="name">
-                  Your name
+                  {t.me.yourName}
                 </label>
-                <input id="name" name="name" required minLength={2} className="w-full" placeholder="e.g. Anna" autoComplete="off" />
+                <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.me.namePlaceholder} autoComplete="off" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label" htmlFor="pin">
-                    4-digit PIN
+                    {t.me.pin4}
                   </label>
                   <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                 </div>
                 <div>
                   <label className="label" htmlFor="confirm">
-                    Repeat
+                    {t.me.repeat}
                   </label>
                   <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                 </div>
               </div>
-              <p className="text-xs text-muted">Everyone starts at {db.settings.startRating} Elo. The PIN is only needed to claim your profile on another device.</p>
-              <SubmitButton pendingText="Joining…">Join the club</SubmitButton>
+              <p className="text-xs text-muted">{fmt(t.me.startHint, { rating: db.settings.startRating })}</p>
+              <SubmitButton pendingText={t.me.joining}>{t.me.joinClub}</SubmitButton>
             </form>
           </Section>
-          <Section title="Why ask?">
+          <Section title={t.me.whyAsk}>
             <ul className="text-sm text-muted flex flex-col gap-1.5 list-disc pl-4">
-              <li>Your name and face sit in the header; your row is marked on the leaderboard.</li>
-              <li>Only you can change your avatar and PIN. Only the admin can edit or remove players.</li>
-              <li>Skipping is fine: results and pairings never need an identity.</li>
+              <li>{t.me.why1}</li>
+              <li>{t.me.why2}</li>
+              <li>{t.me.why3}</li>
             </ul>
           </Section>
         </div>

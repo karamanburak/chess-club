@@ -1,7 +1,9 @@
 import type { Game, Player, SessionRound } from "@/lib/types";
+import { getT } from "@/lib/lang";
 import { ColorDot, RatingDelta } from "./ui";
 
-export function RoundList({ r, games, names }: { r: SessionRound; games: Map<string, Game>; names: Map<string, Player> }) {
+export async function RoundList({ r, games, names }: { r: SessionRound; games: Map<string, Game>; names: Map<string, Player> }) {
+  const { t } = await getT();
   return (
     <table className="table">
       <tbody>
@@ -30,7 +32,7 @@ export function RoundList({ r, games, names }: { r: SessionRound; games: Map<str
           <tr>
             <td className="font-mono text-muted">–</td>
             <td colSpan={3} className="text-muted text-sm">
-              {names.get(r.byePlayerId)?.name} · bye
+              {names.get(r.byePlayerId)?.name} · {t.common.bye}
             </td>
           </tr>
         )}

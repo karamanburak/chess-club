@@ -57,7 +57,7 @@ export function db(players: Player[], games: Game[] = [], tournaments: Tournamen
       startRating: 1200,
       byePoints: 1,
       defaultTiebreaks: ["buchholz", "sonneborn", "direct", "wins"],
-      club: { name: "Test Club", motto: "", founded: "", meets: "", nextNight: "", announcement: "" },
+      club: { name: "Test Club", meets: "", nextNight: "", announcement: "" },
     },
   };
 }

@@ -1,34 +1,33 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
 import { createTournament } from "@/lib/actions";
-import { formatDate, leaderboard, standings, TIEBREAK_PRESETS } from "@/lib/queries";
+import { formatDate, leaderboard, standings, tiebreakPresets } from "@/lib/queries";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Avatar, Empty, PageHeader, Section, StatusBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-const MODES = [
-  { value: "random", label: "Random", help: "Anyone can meet anyone. Rematches avoided, colors balanced." },
-  { value: "swiss", label: "Swiss", help: "Players on similar scores meet. Standard for larger groups." },
-  { value: "roundrobin", label: "Round robin", help: "Everyone plays everyone once. Best for up to ~10 players." },
-  { value: "knockout", label: "Knockout", help: "Seeded bracket by rating: round of 16 → quarterfinals → semifinals → final. Ties get a tiebreak game." },
-];
+const MODE_KEYS = ["random", "swiss", "roundrobin", "knockout"] as const;
 
 export default async function TournamentsPage() {
+  const { t: msg, lang } = await getT();
   const db = await readDb();
   const list = [...db.tournaments].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const players = leaderboard(db);
   const suggestedRounds = Math.max(3, Math.min(7, Math.ceil(Math.log2(Math.max(players.length, 2))) + 1));
+  const modes = MODE_KEYS.map((value) => ({ value, ...msg.tournaments.modes[value] }));
 
   return (
     <>
-      <PageHeader eyebrow="Compete" title="Tournaments" subtitle={<span>{list.length} total</span>} />
+      <PageHeader eyebrow={msg.tournaments.eyebrow} title={msg.tournaments.title} subtitle={<span>{fmt(msg.tournaments.totalN, { n: list.length })}</span>} />
 
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <div className="flex flex-col gap-3">
           {list.length === 0 ? (
             <div className="card">
-              <Empty icon="♜" title="No tournaments yet">Create one on the right. Pairings and colors are handled for you.</Empty>
+              <Empty icon="rook" title={msg.tournaments.noneYet}>{msg.tournaments.noneYetHint}</Empty>
             </div>
           ) : (
             list.map((t) => {
@@ -41,9 +40,9 @@ export default async function TournamentsPage() {
                     <div className="min-w-0">
                       <div className="font-semibold text-base truncate">{t.name}</div>
                       <div className="text-xs text-muted mt-0.5">
-                        {formatDate(t.date)} · {t.participantIds.length} players · {MODES.find((m) => m.value === t.pairingMode)?.label}
+                        {formatDate(t.date, lang)} · {plural(t.participantIds.length, msg.common.playersN)} · {msg.tournaments.modes[t.pairingMode].label}
                         {t.timeControl && ` · ${t.timeControl}`}
-                        {!t.rated && " · unrated"}
+                        {!t.rated && ` · ${msg.common.unrated}`}
                       </div>
                     </div>
                     <StatusBadge status={t.status} />
@@ -53,12 +52,12 @@ export default async function TournamentsPage() {
                       <div className={`h-full rounded-full ${t.status === "finished" ? "bg-win" : "bg-accent"}`} style={{ width: `${progress}%` }} />
                     </div>
                     <span className="text-xs text-muted font-mono whitespace-nowrap">
-                      R {t.rounds.length}/{t.plannedRounds}
+                      {fmt(msg.tournaments.roundsShort, { n: t.rounds.length, total: t.plannedRounds })}
                     </span>
                   </div>
                   {top && (
                     <div className="flex items-center gap-2 text-sm">
-                      <span className="text-muted text-xs uppercase tracking-wider">{t.status === "finished" ? "Winner" : "Leading"}</span>
+                      <span className="text-muted text-xs uppercase tracking-wider">{t.status === "finished" ? msg.tournaments.winner : msg.tournaments.leading}</span>
                       <Avatar id={top.playerId} name={top.name} size="xs" />
                       <span className="font-medium">{top.name}</span>
                       <span className="font-mono text-accent">{top.points}</span>
@@ -70,23 +69,23 @@ export default async function TournamentsPage() {
           )}
         </div>
 
-        <Section title="New tournament">
+        <Section title={msg.tournaments.newTournament}>
           <form action={createTournament} className="flex flex-col gap-4">
             <div>
-              <label className="label">Name</label>
-              <input name="name" required className="w-full" placeholder="e.g. Autumn Blitz 2026" autoComplete="off" />
+              <label className="label">{msg.tournaments.form.name}</label>
+              <input name="name" required className="w-full" placeholder={msg.tournaments.form.namePlaceholder} autoComplete="off" />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="label">Date</label>
+                <label className="label">{msg.tournaments.form.date}</label>
                 <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="w-full" />
               </div>
-              <div>
-                <label className="label">Rounds</label>
+              <div className={`transition-opacity [form:has(input[name=pairingMode][value=roundrobin]:checked)_&]:opacity-50 [form:has(input[name=pairingMode][value=knockout]:checked)_&]:opacity-50`} title={msg.tournaments.form.roundsAuto}>
+                <label className="label">{msg.tournaments.form.rounds}</label>
                 <input name="plannedRounds" type="number" min={1} max={30} defaultValue={suggestedRounds} className="w-full" />
               </div>
               <div>
-                <label className="label">Time control</label>
+                <label className="label">{msg.tournaments.form.timeControl}</label>
                 <input name="timeControl" className="w-full" placeholder="5+3" list="tc" />
                 <datalist id="tc">
                   <option value="3+2" />
@@ -99,9 +98,9 @@ export default async function TournamentsPage() {
               </div>
             </div>
             <div>
-              <label className="label">Format</label>
+              <label className="label">{msg.tournaments.form.format}</label>
               <div className="grid grid-cols-1 gap-2">
-                {MODES.map((m, i) => (
+                {modes.map((m, i) => (
                   <label key={m.value} className="chip items-start">
                     <input type="radio" name="pairingMode" value={m.value} defaultChecked={i === 0} className="mt-0.5" />
                     <span>
@@ -111,25 +110,27 @@ export default async function TournamentsPage() {
                   </label>
                 ))}
               </div>
-              <p className="text-xs text-muted mt-1.5">Round robin and knockout set the round count themselves.</p>
+              <p className="text-xs text-muted mt-1.5">{msg.tournaments.form.formatHint}</p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            {/* Only meaningful for a knockout; shown by CSS as soon as that radio is picked, no client JS needed. */}
+            <fieldset className={`hidden [form:has(input[name=pairingMode][value=knockout]:checked)_&]:flex flex-col gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3`}>
+              <legend className="label px-1">{msg.tournaments.form.knockoutOptions}</legend>
               <div>
-                <label className="label">Knockout: games per match</label>
+                <label className="label">{msg.tournaments.form.gamesPerMatchShort}</label>
                 <select name="gamesPerMatch" className="w-full" defaultValue="1">
-                  <option value="1">1 game (tiebreak on draw)</option>
-                  <option value="2">2 games, colors swapped</option>
+                  <option value="1">{msg.tournaments.form.oneGameTiebreak}</option>
+                  <option value="2">{msg.tournaments.form.twoGamesSwapped}</option>
                 </select>
               </div>
-              <label className="chip self-end">
-                <input type="checkbox" name="thirdPlace" defaultChecked /> <span>Knockout: play a 3rd-place match</span>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="thirdPlace" defaultChecked /> <span>{msg.tournaments.form.thirdPlaceShort}</span>
               </label>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+            </fieldset>
+            <div className={`grid grid-cols-1 gap-3 [form:has(input[name=pairingMode][value=knockout]:checked)_&]:hidden`}>
               <div>
-                <label className="label">Tiebreaks</label>
+                <label className="label">{msg.tournaments.form.tiebreaks}</label>
                 <select name="tiebreaks" className="w-full" defaultValue="club">
-                  {TIEBREAK_PRESETS.map((p) => (
+                  {tiebreakPresets(msg.tournaments.tiebreakPresets).map((p) => (
                     <option key={p.key} value={p.key}>
                       {p.label}
                     </option>
@@ -137,21 +138,21 @@ export default async function TournamentsPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Bye scores</label>
+                <label className="label">{msg.tournaments.form.byeScores}</label>
                 <select name="byePoints" className="w-full" defaultValue={String(db.settings.byePoints)}>
-                  <option value="1">1 point</option>
-                  <option value="0.5">½ point</option>
+                  <option value="1">{msg.tournaments.form.onePoint}</option>
+                  <option value="0.5">{msg.tournaments.form.halfPoint}</option>
                 </select>
               </div>
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="rated" value="on" defaultChecked /> Rated (games change Elo)
+              <input type="checkbox" name="rated" value="on" defaultChecked /> {msg.tournaments.form.ratedElo}
             </label>
             <input type="hidden" name="rated" value="off" />
             <div>
-              <label className="label">Participants</label>
+              <label className="label">{msg.tournaments.form.participants}</label>
               {players.length === 0 ? (
-                <p className="text-sm text-muted">No active players yet.</p>
+                <p className="text-sm text-muted">{msg.tournaments.form.noActivePlayers}</p>
               ) : (
                 <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto pr-1">
                   {players.map((p) => (
@@ -164,7 +165,7 @@ export default async function TournamentsPage() {
                 </div>
               )}
             </div>
-            <SubmitButton pendingText="Creating…">Create tournament</SubmitButton>
+            <SubmitButton pendingText={msg.tournaments.form.creating}>{msg.tournaments.form.create}</SubmitButton>
           </form>
         </Section>
       </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
+import { useT } from "./I18nProvider";
 
 type Theme = "dark" | "light";
 
@@ -11,6 +12,7 @@ function apply(theme: Theme) {
 }
 
 export function ThemeToggle() {
+  const { t } = useT();
   const [theme, setTheme] = useState<Theme>("dark");
   useEffect(() => {
     const stored = (typeof window !== "undefined" && (localStorage.getItem("theme") as Theme | null)) || null;
@@ -26,7 +28,7 @@ export function ThemeToggle() {
     } catch {}
   };
   return (
-    <button type="button" onClick={toggle} className="btn btn-sm btn-ghost text-base leading-none" title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
+    <button type="button" onClick={toggle} className="btn btn-sm btn-ghost text-base leading-none" title={theme === "dark" ? t.nav.themeToLight : t.nav.themeToDark}>
       <Icon name={theme === "dark" ? "sun" : "moon"} className="h-4 w-4" />
     </button>
   );

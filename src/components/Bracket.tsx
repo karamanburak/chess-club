@@ -1,5 +1,6 @@
 import type { MatchState } from "@/lib/queries";
 import type { KnockoutMatch, Player } from "@/lib/types";
+import { plural, type Dict } from "@/lib/i18n";
 import { Avatar } from "./ui";
 
 export interface BracketRound {
@@ -8,8 +9,8 @@ export interface BracketRound {
   matches: (KnockoutMatch & { state: MatchState })[];
 }
 
-function Side({ id, seed, score, names, winner, loser, pending, walkover }: { id: string | null; seed: number | null; score: number; names: Map<string, Player>; winner: boolean; loser: boolean; pending: boolean; walkover: boolean }) {
-  if (!id) return <div className="flex items-center gap-2 px-3 py-2 text-muted text-sm italic">bye</div>;
+function Side({ id, seed, score, names, winner, loser, pending, walkover, byeLabel }: { id: string | null; seed: number | null; score: number; names: Map<string, Player>; winner: boolean; loser: boolean; pending: boolean; walkover: boolean; byeLabel: string }) {
+  if (!id) return <div className="flex items-center gap-2 px-3 py-2 text-muted text-sm italic">{byeLabel}</div>;
   const name = names.get(id)?.name ?? "?";
   return (
     <div className={`flex items-center gap-2 px-3 py-2 text-sm ${winner ? "font-semibold" : loser ? "text-muted" : ""}`}>
@@ -22,7 +23,9 @@ function Side({ id, seed, score, names, winner, loser, pending, walkover }: { id
   );
 }
 
-export function Bracket({ rounds, names, currentRound }: { rounds: BracketRound[]; names: Map<string, Player>; currentRound: number }) {
+/** Server component; the page passes its dictionary as `msg`. */
+export function Bracket({ rounds, names, currentRound, msg }: { rounds: BracketRound[]; names: Map<string, Player>; currentRound: number; msg: Dict }) {
+  const ui = msg.tournaments.bracketUi;
   return (
     <div className="scroll-x">
       <div className="flex gap-6 min-w-max p-1">
@@ -30,7 +33,7 @@ export function Bracket({ rounds, names, currentRound }: { rounds: BracketRound[
           <div key={r.number} className="flex flex-col w-60">
             <div className={`text-[11px] uppercase tracking-wider mb-2 px-1 ${r.number === currentRound ? "text-accent" : "text-muted"}`}>
               {r.name}
-              {r.number > currentRound && <span className="ml-1 opacity-60">· upcoming</span>}
+              {r.number > currentRound && <span className="ml-1 opacity-60">{ui.upcoming}</span>}
             </div>
             <div className="flex flex-col justify-around flex-1 gap-3">
               {r.matches.map((m) => {
@@ -38,19 +41,19 @@ export function Bracket({ rounds, names, currentRound }: { rounds: BracketRound[
                 const pending = m.state.played === 0 && !m.state.walkover;
                 return (
                   <div key={m.id} className={`rounded-xl border overflow-hidden bg-panel ${m.thirdPlace ? "border-dashed" : ""} ${decided ? "border-line" : r.number === currentRound ? "border-accent/50" : "border-line/60"}`}>
-                    {m.thirdPlace && <div className="text-[10px] uppercase tracking-wider text-muted px-3 pt-1.5">3rd place</div>}
-                    <Side id={m.a} seed={m.seedA} score={m.state.scoreA} names={names} winner={decided && m.winnerId === m.a} loser={decided && m.winnerId !== m.a} pending={pending} walkover={m.state.walkover} />
+                    {m.thirdPlace && <div className="text-[10px] uppercase tracking-wider text-muted px-3 pt-1.5">{ui.thirdPlace}</div>}
+                    <Side id={m.a} seed={m.seedA} score={m.state.scoreA} names={names} winner={decided && m.winnerId === m.a} loser={decided && m.winnerId !== m.a} pending={pending} walkover={m.state.walkover} byeLabel={msg.common.bye} />
                     <div className="border-t border-line/60" />
-                    <Side id={m.b} seed={m.seedB} score={m.state.scoreB} names={names} winner={decided && m.winnerId === m.b} loser={decided && m.winnerId !== m.b} pending={pending} walkover={m.state.walkover} />
+                    <Side id={m.b} seed={m.seedB} score={m.state.scoreB} names={names} winner={decided && m.winnerId === m.b} loser={decided && m.winnerId !== m.b} pending={pending} walkover={m.state.walkover} byeLabel={msg.common.bye} />
                     {!decided && m.state.played > 0 && m.state.pending > 0 && m.state.scoreA === m.state.scoreB && (
-                      <div className="text-[10px] text-accent px-3 pb-1.5">tiebreak game pending</div>
+                      <div className="text-[10px] text-accent px-3 pb-1.5">{ui.tiebreakPending}</div>
                     )}
                   </div>
                 );
               })}
               {r.matches.length === 0 && (
                 <div className="rounded-xl border border-dashed border-line/60 text-muted text-xs text-center py-6">
-                  {2 ** (rounds.length - r.number)} match{2 ** (rounds.length - r.number) === 1 ? "" : "es"}
+                  {plural(2 ** (rounds.length - r.number), ui.matchesN)}
                 </div>
               )}
             </div>

@@ -7,7 +7,7 @@ with automatic daily snapshots in `data/backups/`.
 
 ```bash
 bun install
-bun run dev          # http://localhost:3000
+bun run dev          # http://localhost:5173
 bun run dev:lan      # also reachable from phones on the same Wi-Fi (URL shown on the Admin page)
 ```
 

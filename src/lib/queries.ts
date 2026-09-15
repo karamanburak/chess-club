@@ -1,4 +1,6 @@
 import type { ClubSession, Database, Game, GameResult, Player, TiebreakKey, Tournament } from "./types";
+import { fmt, localeOf, type Dict, type Lang } from "./i18n";
+import { tournaments as tournamentMessages } from "./i18n/messages/tournaments";
 import { EMPTY_COLOR, pairKey, type ColorStats } from "./pairing";
 import { countsForRating, isForfeit, performanceRating, PROVISIONAL_GAMES, recomputeRatings, scoreFor } from "./elo";
 
@@ -248,13 +250,21 @@ export const TIEBREAK_LABELS: Record<TiebreakKey, { short: string; label: string
   blackwins: { short: "BW", label: "Wins with black", help: "More wins with black ranks higher" },
 };
 
-export const TIEBREAK_PRESETS: { key: string; label: string; order: TiebreakKey[] }[] = [
-  { key: "club", label: "Buchholz → SB → Direct → Wins", order: ["buchholz", "sonneborn", "direct", "wins"] },
-  { key: "sb", label: "SB → Direct → Buchholz", order: ["sonneborn", "direct", "buchholz", "wins"] },
-  { key: "direct", label: "Direct → Buchholz → SB", order: ["direct", "buchholz", "sonneborn", "wins"] },
-  { key: "prog", label: "Progressive → Buchholz → Wins", order: ["progressive", "buchholz", "wins"] },
-  { key: "rr", label: "Round robin: Direct → SB → Wins → Black wins", order: ["direct", "sonneborn", "wins", "blackwins"] },
+export type TiebreakPresetKey = keyof Dict["tournaments"]["tiebreakPresets"];
+
+/** English labels by default; pass `t.tournaments.tiebreakPresets` (or use `tiebreakPresets(m)`) for the current language. */
+export const TIEBREAK_PRESETS: { key: TiebreakPresetKey; label: string; order: TiebreakKey[] }[] = [
+  { key: "club", label: tournamentMessages.en.tiebreakPresets.club, order: ["buchholz", "sonneborn", "direct", "wins"] },
+  { key: "sb", label: tournamentMessages.en.tiebreakPresets.sb, order: ["sonneborn", "direct", "buchholz", "wins"] },
+  { key: "direct", label: tournamentMessages.en.tiebreakPresets.direct, order: ["direct", "buchholz", "sonneborn", "wins"] },
+  { key: "prog", label: tournamentMessages.en.tiebreakPresets.prog, order: ["progressive", "buchholz", "wins"] },
+  { key: "rr", label: tournamentMessages.en.tiebreakPresets.rr, order: ["direct", "sonneborn", "wins", "blackwins"] },
 ];
+
+/** The presets with their labels in the given language (same keys and order as TIEBREAK_PRESETS). */
+export function tiebreakPresets(m: Dict["tournaments"]["tiebreakPresets"] = tournamentMessages.en.tiebreakPresets): typeof TIEBREAK_PRESETS {
+  return TIEBREAK_PRESETS.map((p) => ({ ...p, label: m[p.key] }));
+}
 
 export interface StandingRow {
   playerId: string;
@@ -657,21 +667,21 @@ export function scoreLabel(score: number | null | undefined): string {
   return String(score);
 }
 
-export function formatDate(iso: string): string {
+export function formatDate(iso: string, lang: Lang = "en"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" });
 }
 
-export function formatDateTime(iso: string): string {
+export function formatDateTime(iso: string, lang: Lang = "en"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(localeOf(lang), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatMonth(ym: string): string {
+export function formatMonth(ym: string, lang: Lang = "en"): string {
   const [y, m] = ym.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  return new Date(y, m - 1, 1).toLocaleDateString(localeOf(lang), { month: "long", year: "numeric" });
 }
 
 /* ------------------------------------------------------------------ */
@@ -679,16 +689,19 @@ export function formatMonth(ym: string): string {
 /* ------------------------------------------------------------------ */
 
 export function knockoutRounds(t: Tournament): number {
-  const size = t.knockout?.bracketSize ?? Math.max(2, 1 << Math.ceil(Math.log2(Math.max(2, t.participantIds.length))));
+  // bracketSize is 0 until the bracket is drawn; fall back to the field size then.
+  const size = t.knockout?.bracketSize || Math.max(2, 1 << Math.ceil(Math.log2(Math.max(2, t.participantIds.length))));
   return Math.round(Math.log2(size));
 }
 
-export function knockoutRoundName(round: number, totalRounds: number): string {
+/** "Final", "Semifinals", … English by default; pass `t.tournaments.rounds` (title case) or `t.tournaments.roundsInSentence`. */
+export function knockoutRoundName(round: number, totalRounds: number, m: Dict["tournaments"]["rounds"] = tournamentMessages.en.rounds): string {
   const left = totalRounds - round; // rounds remaining after this one
-  if (left === 0) return "Final";
-  if (left === 1) return "Semifinals";
-  if (left === 2) return "Quarterfinals";
-  return `Round of ${2 ** (left + 1)}`;
+  if (left === 0) return m.final;
+  if (left === 1) return m.semifinals;
+  if (left === 2) return m.quarterfinals;
+  if (left === 3) return m.roundOf16;
+  return fmt(m.roundOf, { n: 2 ** (left + 1) });
 }
 
 export interface MatchState {
@@ -737,8 +750,11 @@ export interface KnockoutPlacement {
   losses: number;
 }
 
-/** Final (or provisional) placement: champion, runner-up, then by the round a player was knocked out. */
-export function knockoutPlacement(db: Database, t: Tournament): KnockoutPlacement[] {
+/**
+ * Final (or provisional) placement: champion, runner-up, then by the round a player was knocked out.
+ * Labels are English by default (club.ts and tests rely on that); pass `t.tournaments` for the current language.
+ */
+export function knockoutPlacement(db: Database, t: Tournament, m: Dict["tournaments"] = tournamentMessages.en): KnockoutPlacement[] {
   const ko = t.knockout;
   if (!ko) return [];
   const total = knockoutRounds(t);
@@ -774,10 +790,10 @@ export function knockoutPlacement(db: Database, t: Tournament): KnockoutPlacemen
     placed.add(id);
     rows.push({ playerId: id, place, label, wins: wins.get(id) ?? 0, losses: lostIn.has(id) ? 1 : 0 });
   };
-  push(champion, 1, "Champion");
-  push(runnerUp, 2, "Runner-up");
-  push(third, 3, "3rd place");
-  push(fourth, 4, "4th place");
+  push(champion, 1, m.placementLabels.champion);
+  push(runnerUp, 2, m.placementLabels.runnerUp);
+  push(third, 3, m.placementLabels.third);
+  push(fourth, 4, m.placementLabels.fourth);
   // Remaining players grouped by the round they were knocked out of, deepest first.
   const rest = t.participantIds.filter((id) => !placed.has(id));
   rest.sort((x, y) => (reached.get(y) ?? 0) - (reached.get(x) ?? 0) || (players.get(y)?.rating ?? 0) - (players.get(x)?.rating ?? 0));
@@ -795,12 +811,12 @@ export function knockoutPlacement(db: Database, t: Tournament): KnockoutPlacemen
       lastRound = r;
     }
     const label = inThirdPlace.has(id)
-      ? "Playing for 3rd place"
+      ? m.placementLabels.playingForThird
       : knockedOut
-        ? `Lost in ${knockoutRoundName(r, total).toLowerCase()}`
+        ? fmt(m.placementLabels.lostIn, { round: knockoutRoundName(r, total, m.roundsInSentence) })
         : t.status === "finished"
-          ? "Withdrawn"
-          : `In ${knockoutRoundName(r, total).toLowerCase()}`;
+          ? m.placementLabels.withdrawn
+          : fmt(m.placementLabels.inRound, { round: knockoutRoundName(r, total, m.roundsInSentence) });
     rows.push({ playerId: id, place: groupStart, label, wins: wins.get(id) ?? 0, losses: knockedOut ? 1 : 0 });
     place++;
   }

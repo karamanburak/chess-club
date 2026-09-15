@@ -4,15 +4,17 @@ import { useOptimistic, useState, useTransition } from "react";
 import { setGameResult, swapColors } from "@/lib/actions";
 import type { GameResult } from "@/lib/types";
 import { useToast } from "./Toast";
+import { useT } from "./I18nProvider";
+import { fmt } from "@/lib/i18n";
 
-const main: { value: GameResult; label: string; title: string }[] = [
-  { value: "1-0", label: "1–0", title: "White wins" },
-  { value: "1/2-1/2", label: "½", title: "Draw" },
-  { value: "0-1", label: "0–1", title: "Black wins" },
+const main: { value: GameResult; label: string; title: "whiteWins" | "draw" | "blackWins" }[] = [
+  { value: "1-0", label: "1–0", title: "whiteWins" },
+  { value: "1/2-1/2", label: "½", title: "draw" },
+  { value: "0-1", label: "0–1", title: "blackWins" },
 ];
-const extra: { value: GameResult; label: string; title: string }[] = [
-  { value: "+/-", label: "+ / –", title: "Black did not show up (white wins by forfeit, no Elo)" },
-  { value: "-/+", label: "– / +", title: "White did not show up (black wins by forfeit, no Elo)" },
+const extra: { value: GameResult; label: string; title: "blackForfeit" | "whiteForfeit"; absent: "blackAbsent" | "whiteAbsent" }[] = [
+  { value: "+/-", label: "+ / –", title: "blackForfeit", absent: "blackAbsent" },
+  { value: "-/+", label: "– / +", title: "whiteForfeit", absent: "whiteAbsent" },
 ];
 
 export function ResultButtons({
@@ -35,6 +37,7 @@ export function ResultButtons({
   const [pending, start] = useTransition();
   const [menu, setMenu] = useState(false);
   const toast = useToast();
+  const { t } = useT();
 
   const choose = (next: GameResult | null) => {
     const prev = value;
@@ -48,7 +51,7 @@ export function ResultButtons({
         return;
       }
       if (names) {
-        const label = target ? (target === "1/2-1/2" ? "Draw" : target === "1-0" || target === "+/-" ? `${names.white} wins` : `${names.black} wins`) : "Result cleared";
+        const label = target ? (target === "1/2-1/2" ? t.pairing.draw : fmt(t.pairing.nameWins, { name: target === "1-0" || target === "+/-" ? names.white : names.black })) : t.pairing.resultCleared;
         toast.push({
           text: `${label} · ${names.white} – ${names.black}`,
           tone: "ok",
@@ -65,7 +68,7 @@ export function ResultButtons({
   const isForfeit = value === "+/-" || value === "-/+";
 
   return (
-    <div className={`relative inline-flex items-center gap-1 transition-opacity ${pending ? "opacity-60" : ""}`} role="group" aria-label="Result">
+    <div className={`relative inline-flex items-center gap-1 transition-opacity ${pending ? "opacity-60" : ""}`} role="group" aria-label={t.common.result}>
       {main.map((o) => {
         const active = value === o.value;
         return (
@@ -73,7 +76,7 @@ export function ResultButtons({
             key={o.value}
             type="button"
             disabled={disabled}
-            title={active ? "Click again to clear" : o.title}
+            title={active ? t.pairing.clickToClear : t.pairing[o.title]}
             onClick={() => choose(o.value)}
             className={`font-mono font-medium border transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${base} ${
               active
@@ -91,7 +94,7 @@ export function ResultButtons({
         type="button"
         disabled={disabled}
         onClick={() => setMenu((m) => !m)}
-        title="Forfeit / more"
+        title={t.pairing.forfeitMore}
         className={`font-mono border transition-all cursor-pointer disabled:opacity-40 ${base} ${isForfeit ? "bg-accent text-accent-fg border-accent" : "bg-transparent text-muted border-transparent hover:border-line"}`}
       >
         {isForfeit ? (value === "+/-" ? "+/–" : "–/+") : "⋯"}
@@ -101,9 +104,9 @@ export function ResultButtons({
           <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
           <div className="absolute right-0 top-full mt-1 z-40 card p-1.5 min-w-56 flex flex-col gap-0.5 shadow-xl fade-up">
             {extra.map((o) => (
-              <button key={o.value} type="button" onClick={() => choose(o.value)} className="btn btn-sm btn-ghost justify-start" title={o.title}>
+              <button key={o.value} type="button" onClick={() => choose(o.value)} className="btn btn-sm btn-ghost justify-start" title={t.pairing[o.title]}>
                 <span className="font-mono w-10 text-left">{o.label}</span>
-                <span className="text-muted">{o.value === "+/-" ? "Black absent" : "White absent"}</span>
+                <span className="text-muted">{t.pairing[o.absent]}</span>
               </button>
             ))}
             {allowSwap && !value && (
@@ -114,18 +117,18 @@ export function ResultButtons({
                   setMenu(false);
                   start(async () => {
                     const res = await swapColors(gameId);
-                    toast.push(res.error ? { text: res.error, tone: "error" } : { text: "Colors swapped", tone: "info" });
+                    toast.push(res.error ? { text: res.error, tone: "error" } : { text: t.pairing.colorsSwapped, tone: "info" });
                   });
                 }}
               >
                 <span className="w-10 text-left">⇄</span>
-                <span className="text-muted">Swap colors</span>
+                <span className="text-muted">{t.pairing.swapColors}</span>
               </button>
             )}
             {value && (
               <button type="button" className="btn btn-sm btn-ghost justify-start" onClick={() => choose(null)}>
                 <span className="w-10 text-left">×</span>
-                <span className="text-muted">Clear result</span>
+                <span className="text-muted">{t.pairing.clearResult}</span>
               </button>
             )}
           </div>

@@ -2,7 +2,10 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { notFound } from "next/navigation";
 import { readDb } from "@/lib/db";
-import { isAdmin } from "@/lib/auth";
+import { currentPlayerId, isAdmin } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt, plural, type Dict } from "@/lib/i18n";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import {
   deleteLastRound,
   deleteTournament,
@@ -26,10 +29,10 @@ import {
   roundComplete,
   roundHasResults,
   standings,
-  TIEBREAK_LABELS,
-  TIEBREAK_PRESETS,
+  tiebreakPresets,
 } from "@/lib/queries";
 import { Bracket, type BracketRound } from "@/components/Bracket";
+import { PairingReveal, type Seat } from "@/components/PairingReveal";
 import { ResultButtons } from "@/components/ResultButtons";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmButton } from "@/components/ConfirmButton";
@@ -50,13 +53,6 @@ import type { Game, Player, Round, Tournament } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const MODE_LABEL = {
-  random: "Random",
-  swiss: "Swiss",
-  roundrobin: "Round robin",
-  knockout: "Knockout",
-};
-
 export default async function TournamentPage({
   params,
   searchParams,
@@ -65,8 +61,10 @@ export default async function TournamentPage({
   const sp = await searchParams;
   const editRound = typeof sp.edit === "string" ? Number(sp.edit) : null;
   const view = sp.view === "cross" ? "cross" : "standings";
+  const { t: msg, lang } = await getT();
   const db = await readDb();
   const admin = await isAdmin();
+  const me = await currentPlayerId();
   const t = db.tournaments.find((x) => x.id === id);
   if (!t) notFound();
 
@@ -76,6 +74,11 @@ export default async function TournamentPage({
   const cross = crosstable(db, t);
   const last = t.rounds[t.rounds.length - 1] ?? null;
   const lastComplete = last ? roundComplete(db, t, last.number) : true;
+  // One-time reveal right after a round was generated (generateNextRound redirects with ?reveal=<round>).
+  // Only a random draw gets the "live draw" treatment; computed pairings (Swiss, round robin, knockout) just appear.
+  const reveal = !!last && sp.reveal === String(last.number) && !roundHasResults(db, last);
+  const revealMode = t.pairingMode === "random" ? "draw" : "reveal";
+  const seat = (id: string): Seat => ({ id, name: names.get(id)?.name ?? "?", avatar: names.get(id)?.avatar ?? id });
   const roundsLeft = t.plannedRounds - t.rounds.length;
   const activeCount = t.participantIds.length - t.withdrawnIds.length;
   const isKO = t.pairingMode === "knockout";
@@ -107,7 +110,7 @@ export default async function TournamentPage({
   const bracketRounds: BracketRound[] = isKO
     ? Array.from({ length: koTotal }, (_, i) => ({
         number: i + 1,
-        name: knockoutRoundName(i + 1, koTotal),
+        name: knockoutRoundName(i + 1, koTotal, msg.tournaments.rounds),
         matches: (t.knockout?.matches ?? [])
           .filter((m) => m.round === i + 1)
           .sort(
@@ -117,9 +120,14 @@ export default async function TournamentPage({
           .map((m) => ({ ...m, state: matchState(db, m) })),
       }))
     : [];
-  const placement = isKO ? knockoutPlacement(db, t) : [];
+  const placement = isKO ? knockoutPlacement(db, t, msg.tournaments) : [];
   const roundTitle = (n: number) =>
-    isKO ? knockoutRoundName(n, koTotal) : `Round ${n}`;
+    isKO ? knockoutRoundName(n, koTotal, msg.tournaments.rounds) : fmt(msg.common.roundN, { n });
+  // Button labels: "Advance to semifinals" / "Pair round 3".
+  const nextRoundLabel = (template: string, roundTemplate: string) =>
+    isKO
+      ? fmt(template, { round: knockoutRoundName(t.rounds.length + 1, koTotal, msg.tournaments.roundsInSentence) })
+      : fmt(roundTemplate, { n: t.rounds.length + 1 });
   const locked = new Set<string>();
   for (const r of t.rounds) {
     if (r.byePlayerId) locked.add(r.byePlayerId);
@@ -135,19 +143,20 @@ export default async function TournamentPage({
 
   return (
     <>
+      {t.status === "running" && <AutoRefresh seconds={10} />}
       <PageHeader
         eyebrow={
           <Link href="/tournaments" className="hover:text-fg">
-            ← Tournaments
+            {msg.tournaments.backToList}
           </Link>
         }
         title={t.name}
         subtitle={
           <>
             <StatusBadge status={t.status} />
-            <span>{formatDate(t.date)}</span>
+            <span>{formatDate(t.date, lang)}</span>
             <span>·</span>
-            <span>{MODE_LABEL[t.pairingMode]}</span>
+            <span>{msg.tournaments.modes[t.pairingMode].label}</span>
             {t.timeControl && (
               <>
                 <span>·</span>
@@ -155,38 +164,41 @@ export default async function TournamentPage({
               </>
             )}
             <span>·</span>
-            <span>{t.rated ? "rated" : "unrated"}</span>
+            <span>{t.rated ? msg.common.rated : msg.common.unrated}</span>
             <span>·</span>
             <span>
-              {activeCount} players
+              {plural(activeCount, msg.common.playersN)}
               {t.withdrawnIds.length > 0 &&
-                ` (${t.withdrawnIds.length} withdrawn)`}
+                ` ${fmt(msg.tournaments.withdrawnN, { n: t.withdrawnIds.length })}`}
             </span>
           </>
         }
         actions={
           <>
+            {t.status === "running" && (
+              <Link href="/tv" target="_blank" className="btn" title={msg.common.tvHint}>
+                <Icon name="tv" className="h-4 w-4" /> {msg.common.tv}
+              </Link>
+            )}
             {!finished && (
               <form action={generateNextRound.bind(null, t.id)}>
                 <SubmitButton
                   className="btn btn-primary"
-                  pendingText="Pairing…"
+                  pendingText={msg.common.pairing}
                   disabled={!canGenerate}
                   title={
                     !lastComplete
-                      ? "Enter all results of the current round first"
+                      ? msg.tournaments.enterResultsFirst
                       : roundsLeft <= 0
-                        ? "All planned rounds played"
+                        ? msg.tournaments.allPlannedPlayed
                         : undefined
                   }
                 >
                   {t.rounds.length === 0
                     ? isKO
-                      ? "▶ Start · draw bracket"
-                      : "▶ Start · pair round 1"
-                    : isKO
-                      ? `Advance to ${roundTitle(t.rounds.length + 1).toLowerCase()}`
-                      : `Pair round ${t.rounds.length + 1}`}
+                      ? msg.tournaments.startDrawBracket
+                      : msg.tournaments.startPairRound1
+                    : nextRoundLabel(msg.tournaments.advanceTo, msg.tournaments.pairRound)}
                 </SubmitButton>
               </form>
             )}
@@ -194,15 +206,15 @@ export default async function TournamentPage({
               <form action={setTournamentStatus.bind(null, t.id, "finished")}>
                 <SubmitButton
                   className={`btn ${roundsLeft <= 0 && lastComplete ? "btn-primary" : ""}`}
-                  title={roundsLeft <= 0 ? "All rounds played" : "Finish early"}
+                  title={roundsLeft <= 0 ? msg.tournaments.allRoundsPlayed : msg.tournaments.finishEarly}
                 >
-                  <Icon name="flag" className="h-4 w-4" /> Finish
+                  <Icon name="flag" className="h-4 w-4" /> {msg.tournaments.finish}
                 </SubmitButton>
               </form>
             )}
             {finished && (
               <form action={setTournamentStatus.bind(null, t.id, "running")}>
-                <SubmitButton className="btn">Reopen</SubmitButton>
+                <SubmitButton className="btn">{msg.tournaments.reopen}</SubmitButton>
               </form>
             )}
           </>
@@ -218,13 +230,13 @@ export default async function TournamentPage({
           return (
             <div
               key={n}
-              title={`Round ${n}`}
+              title={fmt(msg.common.roundN, { n })}
               className={`h-2 flex-1 rounded-full ${complete ? "bg-win/80" : isCurrent ? "bg-accent animate-pulse" : played ? "bg-accent" : "bg-panel-2"}`}
             />
           );
         })}
         <span className="text-xs text-muted font-mono ml-2 whitespace-nowrap">
-          {t.rounds.length}/{t.plannedRounds} rounds
+          {fmt(msg.tournaments.roundsProgress, { n: t.rounds.length, total: t.plannedRounds })}
         </span>
       </div>
 
@@ -267,8 +279,8 @@ export default async function TournamentPage({
                   <PlayerLink id={r.playerId} name={r.name} />
                 </div>
                 <div className="text-xs text-muted font-mono">
-                  {r.points} pts
-                  {r.performance !== null && ` · perf ${r.performance}`}
+                  {fmt(msg.common.pointsN, { n: r.points })}
+                  {r.performance !== null && ` · ${fmt(msg.tournaments.perfN, { n: r.performance })}`}
                 </div>
               </div>
             </div>
@@ -278,12 +290,13 @@ export default async function TournamentPage({
 
       {isKO && (
         <div className="mb-6">
-          <Section title="Bracket" flush>
+          <Section title={msg.tournaments.bracket} flush>
             <div className="p-4">
               <Bracket
                 rounds={bracketRounds}
                 names={names}
                 currentRound={t.rounds.length}
+                msg={msg}
               />
             </div>
           </Section>
@@ -294,14 +307,14 @@ export default async function TournamentPage({
         <div className="col-stack gap-4">
           {t.rounds.length === 0 && (
             <div className="card">
-              <Empty icon="♜" title="Ready to start">
-                Check the participants on the right, then press{" "}
-                <strong className="text-fg">Start</strong>.{" "}
+              <Empty icon="rook" title={msg.tournaments.readyTitle}>
+                {msg.tournaments.readyBefore}{" "}
+                <strong className="text-fg">{msg.tournaments.readyStart}</strong>.{" "}
                 {isRR
-                  ? "The full round-robin schedule is generated with balanced colors."
+                  ? msg.tournaments.readyRR
                   : isKO
-                    ? `A ${t.knockout?.bracketSize ?? ""}-player bracket is seeded by rating; top seeds get a bye when the field is not a power of two.`
-                    : "Boards, colors and byes are assigned automatically."}
+                    ? fmt(msg.tournaments.readyKO, { n: t.knockout?.bracketSize ?? "" })
+                    : msg.tournaments.readyDefault}
               </Empty>
             </div>
           )}
@@ -314,20 +327,19 @@ export default async function TournamentPage({
                   {lastComplete ? (
                     koMatchesUndecided > 0 ? (
                       <Pill tone="accent">
-                        {koMatchesUndecided} tiebreak
-                        {koMatchesUndecided === 1 ? "" : "s"} pending
+                        {plural(koMatchesUndecided, msg.tournaments.tiebreaksPending)}
                       </Pill>
                     ) : (
-                      <Pill tone="win">complete</Pill>
+                      <Pill tone="win">{msg.common.complete}</Pill>
                     )
                   ) : (
                     <Pill tone="accent">
-                      {
+                      {plural(
                         last.pairings.filter(
                           (p) => !games.get(p.gameId)?.result,
-                        ).length
-                      }{" "}
-                      boards playing
+                        ).length,
+                        msg.tournaments.boardsPlaying,
+                      )}
                     </Pill>
                   )}
                 </>
@@ -342,16 +354,16 @@ export default async function TournamentPage({
                           href={`/tournaments/${t.id}?edit=${last.number}`}
                           className="btn btn-sm"
                         >
-                          <Icon name="edit" className="h-3.5 w-3.5" /> Edit boards
+                          <Icon name="edit" className="h-3.5 w-3.5" /> {msg.tournaments.editBoards}
                         </Link>
                       )}
                     {admin && (
                       <ConfirmButton
                         action={deleteLastRound.bind(null, t.id)}
                         className="btn btn-sm btn-danger"
-                        confirmLabel="Delete round"
+                        confirmLabel={msg.tournaments.deleteRound}
                       >
-                        Delete round
+                        {msg.tournaments.deleteRound}
                       </ConfirmButton>
                     )}
                   </span>
@@ -360,29 +372,36 @@ export default async function TournamentPage({
               flush
             >
               {editRound === last.number && !roundHasResults(db, last) ? (
-                <EditRound t={t} round={last} names={names} />
+                <EditRound t={t} round={last} names={names} msg={msg} />
               ) : (
-                <RoundTable
-                  round={last}
-                  games={games}
-                  names={names}
-                  finished={finished}
-                  ko={t.knockout}
-                />
+                <PairingReveal
+                  active={reveal}
+                  mode={revealMode}
+                  boards={last.pairings.filter((p) => p.board > 0).map((p) => ({ board: p.board, white: seat(p.whiteId), black: seat(p.blackId) }))}
+                  bye={last.byePlayerId ? seat(last.byePlayerId) : null}
+                >
+                  <RoundTable
+                    round={last}
+                    games={games}
+                    names={names}
+                    finished={finished}
+                    ko={t.knockout}
+                    me={me}
+                    msg={msg}
+                  />
+                </PairingReveal>
               )}
               {lastComplete && canGenerate && (
                 <div className="px-5 py-4 border-t border-line flex items-center justify-between gap-3 bg-panel-2/40 no-print">
                   <span className="text-sm text-muted">
-                    All results are in.
+                    {msg.tournaments.allResultsIn}
                   </span>
                   <form action={generateNextRound.bind(null, t.id)}>
                     <SubmitButton
                       className="btn btn-primary"
-                      pendingText="Pairing…"
+                      pendingText={msg.common.pairing}
                     >
-                      {isKO
-                        ? `Advance to ${roundTitle(t.rounds.length + 1).toLowerCase()} →`
-                        : `Pair round ${t.rounds.length + 1} →`}
+                      {nextRoundLabel(msg.tournaments.advanceToArrow, msg.tournaments.pairRoundArrow)}
                     </SubmitButton>
                   </form>
                 </div>
@@ -390,13 +409,13 @@ export default async function TournamentPage({
               {lastComplete && roundsLeft <= 0 && t.status === "running" && (
                 <div className="px-5 py-4 border-t border-line flex items-center justify-between gap-3 bg-panel-2/40 no-print">
                   <span className="text-sm text-muted">
-                    Final round complete.
+                    {msg.tournaments.finalRoundComplete}
                   </span>
                   <form
                     action={setTournamentStatus.bind(null, t.id, "finished")}
                   >
                     <SubmitButton className="btn btn-primary">
-                      <Icon name="flag" className="h-4 w-4" /> Finish tournament
+                      <Icon name="flag" className="h-4 w-4" /> {msg.tournaments.finishTournament}
                     </SubmitButton>
                   </form>
                 </div>
@@ -407,7 +426,7 @@ export default async function TournamentPage({
           {t.rounds.length > 1 && (
             <div className="flex flex-col gap-2">
               <div className="text-[11px] uppercase tracking-wider text-muted px-1 pt-2">
-                Earlier rounds
+                {msg.tournaments.earlierRounds}
               </div>
               {[...t.rounds]
                 .slice(0, -1)
@@ -422,7 +441,7 @@ export default async function TournamentPage({
                         {roundTitle(round.number)}
                       </span>
                       <span className="text-xs text-muted flex items-center gap-3">
-                        {round.pairings.length} boards
+                        {plural(round.pairings.length, msg.common.boardsN)}
                         <span className="transition-transform group-open:rotate-180">
                           ▾
                         </span>
@@ -435,6 +454,7 @@ export default async function TournamentPage({
                         names={names}
                         finished={finished}
                         ko={t.knockout}
+                        msg={msg}
                       />
                     </div>
                   </details>
@@ -445,14 +465,14 @@ export default async function TournamentPage({
 
         <div className="col-stack">
           {isKO && placement.length > 0 && t.rounds.length > 0 && (
-            <Section title="Placement" flush>
+            <Section title={msg.tournaments.placement} flush>
               <table className="table">
                 <thead>
                   <tr>
                     <th className="w-10 text-center">#</th>
-                    <th>Player</th>
-                    <th>Status</th>
-                    <th className="text-right">Match wins</th>
+                    <th>{msg.common.player}</th>
+                    <th>{msg.tournaments.status}</th>
+                    <th className="text-right">{msg.tournaments.matchWins}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -486,7 +506,7 @@ export default async function TournamentPage({
 
           {!isKO && (
             <Section
-              title={view === "cross" ? "Crosstable" : "Standings"}
+              title={view === "cross" ? msg.tournaments.crosstable : msg.tournaments.standings}
               flush
               right={
                 t.rounds.length > 0 ? (
@@ -495,44 +515,44 @@ export default async function TournamentPage({
                       href={`/tournaments/${t.id}`}
                       className={`px-2.5 py-1 ${view === "standings" ? "bg-panel-2 text-fg" : "text-muted hover:text-fg"}`}
                     >
-                      Table
+                      {msg.tournaments.table}
                     </Link>
                     <Link
                       href={`/tournaments/${t.id}?view=cross`}
                       className={`px-2.5 py-1 border-l border-line ${view === "cross" ? "bg-panel-2 text-fg" : "text-muted hover:text-fg"}`}
                     >
-                      Crosstable
+                      {msg.tournaments.crosstable}
                     </Link>
                   </span>
                 ) : undefined
               }
             >
               {table.length === 0 ? (
-                <Empty icon="♟" title="No participants" />
+                <Empty icon="pawn" title={msg.tournaments.noParticipants} />
               ) : view === "cross" ? (
-                <Crosstable rows={table} table={cross} />
+                <Crosstable rows={table} table={cross} msg={msg} />
               ) : (
                 <div className="scroll-x">
                   <table className="table">
                     <thead>
                       <tr>
                         <th className="w-10 text-center">#</th>
-                        <th>Player</th>
-                        <th className="text-right">Pts</th>
+                        <th>{msg.common.player}</th>
+                        <th className="text-right">{msg.common.points}</th>
                         {tiebreakCols.map((k) => (
                           <th
                             key={k}
                             className="text-right"
-                            title={`${TIEBREAK_LABELS[k].label}: ${TIEBREAK_LABELS[k].help}`}
+                            title={`${msg.tournaments.tiebreaks[k].label}: ${msg.tournaments.tiebreaks[k].help}`}
                           >
-                            {TIEBREAK_LABELS[k].short}
+                            {msg.tournaments.tiebreaks[k].short}
                           </th>
                         ))}
                         <th
                           className="text-right hidden sm:table-cell"
-                          title="Performance rating in this tournament"
+                          title={msg.tournaments.perfTitle}
                         >
-                          Perf
+                          {msg.tournaments.perfShort}
                         </th>
                       </tr>
                     </thead>
@@ -570,7 +590,7 @@ export default async function TournamentPage({
                               </span>
                               {r.byes > 0 && (
                                 <span className="text-[10px] text-muted">
-                                  bye
+                                  {msg.common.bye}
                                 </span>
                               )}
                             </span>
@@ -610,19 +630,17 @@ export default async function TournamentPage({
 
           {!finished && (
             <Section
-              title="Participants"
+              title={msg.tournaments.participants}
               right={
                 <span className="text-xs text-muted">
-                  {t.participantIds.length} selected
+                  {fmt(msg.tournaments.selectedN, { n: t.participantIds.length })}
                 </span>
               }
             >
               {(isRR || isKO) && t.rounds.length > 0 ? (
                 <>
                   <p className="text-xs text-muted -mt-2 mb-3">
-                    {isRR
-                      ? "Round robin: the field is fixed. A player who leaves can be withdrawn; their remaining games are scored as forfeits."
-                      : "Knockout: the bracket is fixed. A withdrawn player hands the match to their opponent."}
+                    {isRR ? msg.tournaments.fixedRR : msg.tournaments.fixedKO}
                   </p>
                   <ul className="flex flex-col gap-1.5">
                     {t.participantIds.map((pid) => {
@@ -649,7 +667,7 @@ export default async function TournamentPage({
                             className="ml-auto"
                           >
                             <SubmitButton className="btn btn-sm btn-ghost">
-                              {withdrawn ? "Rejoin" : "Withdraw"}
+                              {withdrawn ? msg.tournaments.rejoin : msg.tournaments.withdraw}
                             </SubmitButton>
                           </form>
                         </li>
@@ -661,8 +679,8 @@ export default async function TournamentPage({
                 <>
                   <p className="text-xs text-muted -mt-2 mb-3">
                     {t.rounds.length
-                      ? "Players who already played stay in; withdraw them if they leave. Others can join or leave between rounds."
-                      : "Choose who plays."}
+                      ? msg.tournaments.participantsHintStarted
+                      : msg.tournaments.participantsHintNew}
                   </p>
                   <form
                     action={setParticipants.bind(null, t.id)}
@@ -692,13 +710,13 @@ export default async function TournamentPage({
                         );
                       })}
                     </div>
-                    <SubmitButton className="btn" pendingText="Saving…">
-                      Save participants
+                    <SubmitButton className="btn" pendingText={msg.common.saving}>
+                      {msg.tournaments.saveParticipants}
                     </SubmitButton>
                   </form>
                   {t.rounds.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-line">
-                      <div className="label">Withdraw / rejoin</div>
+                      <div className="label">{msg.tournaments.withdrawRejoin}</div>
                       <div className="flex flex-wrap gap-1.5">
                         {t.participantIds.map((pid) => {
                           const withdrawn = t.withdrawnIds.includes(pid);
@@ -711,8 +729,8 @@ export default async function TournamentPage({
                                 className={`btn btn-sm ${withdrawn ? "btn-danger" : ""}`}
                                 title={
                                   withdrawn
-                                    ? "Click to rejoin"
-                                    : "Click to withdraw"
+                                    ? msg.tournaments.clickToRejoin
+                                    : msg.tournaments.clickToWithdraw
                                 }
                               >
                                 {withdrawn ? "↩ " : ""}
@@ -731,13 +749,13 @@ export default async function TournamentPage({
 
           {admin && (
             <>
-              <Section title="Settings">
+              <Section title={msg.tournaments.settings}>
                 <form
                   action={updateTournament.bind(null, t.id)}
                   className="flex flex-col gap-3"
                 >
                   <div>
-                    <label className="label">Name</label>
+                    <label className="label">{msg.tournaments.form.name}</label>
                     <input
                       name="name"
                       defaultValue={t.name}
@@ -746,7 +764,7 @@ export default async function TournamentPage({
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="label">Date</label>
+                      <label className="label">{msg.tournaments.form.date}</label>
                       <input
                         name="date"
                         type="date"
@@ -755,7 +773,7 @@ export default async function TournamentPage({
                       />
                     </div>
                     <div>
-                      <label className="label">Rounds</label>
+                      <label className="label">{msg.tournaments.form.rounds}</label>
                       <input
                         name="plannedRounds"
                         type="number"
@@ -767,7 +785,7 @@ export default async function TournamentPage({
                       />
                     </div>
                     <div>
-                      <label className="label">Time control</label>
+                      <label className="label">{msg.tournaments.form.timeControl}</label>
                       <input
                         name="timeControl"
                         defaultValue={t.timeControl}
@@ -777,17 +795,17 @@ export default async function TournamentPage({
                     </div>
                   </div>
                   <div>
-                    <label className="label">Tiebreaks</label>
+                    <label className="label">{msg.tournaments.form.tiebreaks}</label>
                     <select
                       name="tiebreaks"
                       className="w-full"
                       defaultValue={
-                        TIEBREAK_PRESETS.find(
+                        tiebreakPresets().find(
                           (p) => p.order.join() === t.tiebreaks.join(),
                         )?.key ?? "club"
                       }
                     >
-                      {TIEBREAK_PRESETS.map((p) => (
+                      {tiebreakPresets(msg.tournaments.tiebreakPresets).map((p) => (
                         <option key={p.key} value={p.key}>
                           {p.label}
                         </option>
@@ -798,34 +816,34 @@ export default async function TournamentPage({
                     <>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="label">Format</label>
+                          <label className="label">{msg.tournaments.form.format}</label>
                           <select
                             name="pairingMode"
                             defaultValue={t.pairingMode}
                             className="w-full"
                           >
-                            <option value="random">Random</option>
-                            <option value="swiss">Swiss</option>
-                            <option value="roundrobin">Round robin</option>
-                            <option value="knockout">Knockout</option>
+                            <option value="random">{msg.tournaments.modes.random.label}</option>
+                            <option value="swiss">{msg.tournaments.modes.swiss.label}</option>
+                            <option value="roundrobin">{msg.tournaments.modes.roundrobin.label}</option>
+                            <option value="knockout">{msg.tournaments.modes.knockout.label}</option>
                           </select>
                         </div>
                         <div>
-                          <label className="label">Bye scores</label>
+                          <label className="label">{msg.tournaments.form.byeScores}</label>
                           <select
                             name="byePoints"
                             defaultValue={String(t.byePoints)}
                             className="w-full"
                           >
-                            <option value="1">1 point</option>
-                            <option value="0.5">½ point</option>
+                            <option value="1">{msg.tournaments.form.onePoint}</option>
+                            <option value="0.5">{msg.tournaments.form.halfPoint}</option>
                           </select>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="label">
-                            Knockout: games per match
+                            {msg.tournaments.form.gamesPerMatch}
                           </label>
                           <select
                             name="gamesPerMatch"
@@ -834,8 +852,8 @@ export default async function TournamentPage({
                             )}
                             className="w-full"
                           >
-                            <option value="1">1 game</option>
-                            <option value="2">2 games</option>
+                            <option value="1">{msg.tournaments.form.oneGame}</option>
+                            <option value="2">{msg.tournaments.form.twoGames}</option>
                           </select>
                         </div>
                         <label className="chip self-end">
@@ -844,7 +862,7 @@ export default async function TournamentPage({
                             name="thirdPlace"
                             defaultChecked={t.knockout?.thirdPlace ?? true}
                           />{" "}
-                          <span>3rd-place match</span>
+                          <span>{msg.tournaments.form.thirdPlace}</span>
                         </label>
                       </div>
                       <label className="flex items-center gap-2 text-sm">
@@ -853,26 +871,25 @@ export default async function TournamentPage({
                           name="rated"
                           defaultChecked={t.rated}
                         />{" "}
-                        Rated
+                        {msg.tournaments.form.rated}
                       </label>
                     </>
                   )}
-                  <SubmitButton className="btn" pendingText="Saving…">
-                    Save settings
+                  <SubmitButton className="btn" pendingText={msg.common.saving}>
+                    {msg.tournaments.form.saveSettings}
                   </SubmitButton>
                 </form>
               </Section>
 
-              <Section title="Danger zone">
+              <Section title={msg.tournaments.dangerZone}>
                 <p className="text-xs text-muted -mt-2 mb-3">
-                  Removes the tournament and all its games. Ratings are
-                  recalculated.
+                  {msg.tournaments.dangerHint}
                 </p>
                 <ConfirmButton
                   action={deleteTournament.bind(null, t.id)}
-                  confirmLabel="Delete tournament"
+                  confirmLabel={msg.tournaments.deleteTournament}
                 >
-                  Delete tournament
+                  {msg.tournaments.deleteTournament}
                 </ConfirmButton>
               </Section>
             </>
@@ -889,12 +906,17 @@ function RoundTable({
   names,
   finished,
   ko,
+  me = null,
+  msg,
 }: {
   round: Round;
   games: Map<string, Game>;
   names: Map<string, Player>;
   finished: boolean;
   ko?: Tournament["knockout"];
+  /** The device's claimed player: their board is highlighted. */
+  me?: string | null;
+  msg: Dict;
 }) {
   const gameLabel = (gameId: string) => {
     if (!ko) return null;
@@ -902,10 +924,10 @@ function RoundTable({
     if (!m) return null;
     const idx = m.gameIds.indexOf(gameId);
     const parts: string[] = [];
-    if (m.thirdPlace) parts.push("3rd place");
+    if (m.thirdPlace) parts.push(msg.tournaments.game.thirdPlace);
     if (idx >= ko.gamesPerMatch)
-      parts.push(`tiebreak ${idx - ko.gamesPerMatch + 1}`);
-    else if (ko.gamesPerMatch > 1) parts.push(`game ${idx + 1}`);
+      parts.push(fmt(msg.tournaments.game.tiebreakN, { n: idx - ko.gamesPerMatch + 1 }));
+    else if (ko.gamesPerMatch > 1) parts.push(fmt(msg.tournaments.game.gameN, { n: idx + 1 }));
     return parts.length ? parts.join(" · ") : null;
   };
   return (
@@ -913,10 +935,10 @@ function RoundTable({
       <table className="table">
         <thead>
           <tr>
-            <th className="w-16">Board</th>
-            <th>⚪ White</th>
-            <th>⚫ Black</th>
-            <th className="w-52">Result</th>
+            <th className="w-16">{msg.common.board}</th>
+            <th>⚪ {msg.common.white}</th>
+            <th>⚫ {msg.common.black}</th>
+            <th className="w-52">{msg.common.result}</th>
           </tr>
         </thead>
         <tbody>
@@ -927,10 +949,14 @@ function RoundTable({
             const blackWon = res === "0-1" || res === "-/+";
             const wn = names.get(p.whiteId)?.name ?? "?";
             const bn = names.get(p.blackId)?.name ?? "?";
+            const mine = !!me && (p.whiteId === me || p.blackId === me);
             return (
-              <tr key={p.gameId} className={res ? "" : "bg-accent/[0.03]"}>
+              <tr key={p.gameId} className={`${res ? "" : "bg-accent/[0.03]"} ${mine ? "bg-accent/10" : ""}`}>
                 <td className="font-mono text-muted">
                   {p.board}
+                  {mine && (
+                    <span className="block text-[10px] uppercase tracking-wider text-accent font-sans">{msg.common.you}</span>
+                  )}
                   {gameLabel(p.gameId) && (
                     <span className="block text-[10px] uppercase tracking-wider text-accent font-sans whitespace-nowrap">
                       {gameLabel(p.gameId)}
@@ -986,7 +1012,7 @@ function RoundTable({
                       />
                     )
                   ) : (
-                    <span className="text-loss text-xs">game missing</span>
+                    <span className="text-loss text-xs">{msg.tournaments.game.missing}</span>
                   )}
                 </td>
               </tr>
@@ -1002,10 +1028,10 @@ function RoundTable({
                     id={round.byePlayerId}
                     name={names.get(round.byePlayerId)?.name ?? "?"}
                   />
-                  <span className="text-muted text-xs">bye</span>
+                  <span className="text-muted text-xs">{msg.common.bye}</span>
                 </span>
               </td>
-              <td className="font-mono text-muted text-xs">free point</td>
+              <td className="font-mono text-muted text-xs">{msg.tournaments.game.freePoint}</td>
             </tr>
           )}
         </tbody>
@@ -1018,10 +1044,12 @@ function EditRound({
   t,
   round,
   names,
+  msg,
 }: {
   t: Tournament;
   round: Round;
   names: Map<string, Player>;
+  msg: Dict;
 }) {
   const withdrawn = new Set(t.withdrawnIds);
   const options = t.participantIds.filter((id) => !withdrawn.has(id));
@@ -1031,13 +1059,12 @@ function EditRound({
       className="p-5 flex flex-col gap-3"
     >
       <p className="text-xs text-muted -mt-1">
-        Rearrange who plays whom. Each player may appear once. Leave both sides
-        empty to drop a board.
+        {msg.tournaments.edit.hint}
       </p>
       <div className="grid grid-cols-[3rem_1fr_1fr] gap-2 items-center text-sm">
-        <span className="label mb-0">Board</span>
-        <span className="label mb-0">⚪ White</span>
-        <span className="label mb-0">⚫ Black</span>
+        <span className="label mb-0">{msg.common.board}</span>
+        <span className="label mb-0">⚪ {msg.common.white}</span>
+        <span className="label mb-0">⚫ {msg.common.black}</span>
         {round.pairings.map((p, i) => (
           <div key={p.gameId} className="contents">
             <span className="font-mono text-muted">{i + 1}</span>
@@ -1046,29 +1073,32 @@ function EditRound({
               value={p.whiteId}
               options={options}
               names={names}
+              emptyLabel={msg.tournaments.edit.empty}
             />
             <PlayerSelect
               name={`black_${i}`}
               value={p.blackId}
               options={options}
               names={names}
+              emptyLabel={msg.tournaments.edit.empty}
             />
           </div>
         ))}
-        <span className="font-mono text-muted">bye</span>
+        <span className="font-mono text-muted">{msg.common.bye}</span>
         <div className="col-span-2">
           <PlayerSelect
             name="bye"
             value={round.byePlayerId ?? ""}
             options={options}
             names={names}
+            emptyLabel={msg.tournaments.edit.empty}
           />
         </div>
       </div>
       <div className="flex gap-2">
-        <SubmitButton pendingText="Saving…">Save boards</SubmitButton>
+        <SubmitButton pendingText={msg.common.saving}>{msg.tournaments.edit.saveBoards}</SubmitButton>
         <Link href={`/tournaments/${t.id}`} className="btn">
-          Cancel
+          {msg.common.cancel}
         </Link>
       </div>
     </form>
@@ -1080,15 +1110,17 @@ function PlayerSelect({
   value,
   options,
   names,
+  emptyLabel,
 }: {
   name: string;
   value: string;
   options: string[];
   names: Map<string, Player>;
+  emptyLabel: string;
 }) {
   return (
     <select name={name} defaultValue={value} className="w-full">
-      <option value="">— empty —</option>
+      <option value="">{emptyLabel}</option>
       {options.map((id) => (
         <option key={id} value={id}>
           {names.get(id)?.name}

@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { cache, type ReactNode } from "react";
 import { readDb } from "@/lib/db";
+import { getT } from "@/lib/lang";
+import { fmt, localeOf, plural } from "@/lib/i18n";
 import { FaceSvg } from "./Face";
+import { Icon, type IconName } from "./icons";
 import type { Achievement, Title } from "@/lib/club";
 import type { GameResult } from "@/lib/types";
 
@@ -61,13 +64,14 @@ export function RatingDelta({ before, after, className = "" }: { before: number 
   );
 }
 
-export function StatusBadge({ status }: { status: "planned" | "running" | "finished" }) {
+export async function StatusBadge({ status }: { status: "planned" | "running" | "finished" }) {
+  const { t } = await getT();
   const styles = {
     planned: "border-muted/40 text-muted",
     running: "border-accent/50 text-accent bg-accent/10",
     finished: "border-win/40 text-win bg-win/10",
   }[status];
-  const label = { planned: "Planned", running: "Live", finished: "Finished" }[status];
+  const label = { planned: t.common.planned, running: t.common.live, finished: t.common.finished }[status];
   return (
     <span className={`badge ${styles}`}>
       {status === "running" && <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
@@ -76,10 +80,10 @@ export function StatusBadge({ status }: { status: "planned" | "running" | "finis
   );
 }
 
-export function Empty({ icon = "♟", title, children }: { icon?: string; title?: string; children?: ReactNode }) {
+export function Empty({ icon = "pawn", title, children }: { icon?: IconName; title?: string; children?: ReactNode }) {
   return (
     <div className="text-center py-12 px-6">
-      <div className="text-4xl mb-3 opacity-30">{icon}</div>
+      <Icon name={icon} className="h-10 w-10 mx-auto mb-3 opacity-30" />
       {title && <div className="font-medium mb-1">{title}</div>}
       {children && <div className="text-sm text-muted">{children}</div>}
     </div>
@@ -116,7 +120,7 @@ const MEDAL = ["bg-[#e4a93b] text-[#1a1408] ring-[#f5d78a]", "bg-[#b8bec9] text-
 export function Rank({ n }: { n: number }) {
   if (n <= 3) {
     return (
-      <span className={`inline-grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold ring-1 ring-inset ${MEDAL[n - 1]}`} title={["1st", "2nd", "3rd"][n - 1]}>
+      <span className={`inline-grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold ring-1 ring-inset ${MEDAL[n - 1]}`}>
         {n}
       </span>
     );
@@ -141,30 +145,33 @@ export function Section({ title, right, children, flush }: { title: ReactNode; r
   );
 }
 
-export function Provisional({ games }: { games: number }) {
+export async function Provisional({ games }: { games: number }) {
   if (games >= 30) return null;
+  const { t } = await getT();
   return (
-    <span className="badge border-muted/40 text-muted" title={`Provisional: ${games}/30 games. Rating still moves quickly (K = 40).`}>
+    <span className="badge border-muted/40 text-muted" title={fmt(t.common.provisional, { games })}>
       P
     </span>
   );
 }
 
-export function RankMove({ delta }: { delta: number | undefined }) {
+export async function RankMove({ delta }: { delta: number | undefined }) {
   if (!delta) return null;
+  const { t } = await getT();
   return (
-    <span className={`font-mono text-xs ${delta > 0 ? "text-win" : "text-loss"}`} title={`${Math.abs(delta)} place${Math.abs(delta) > 1 ? "s" : ""} ${delta > 0 ? "up" : "down"} vs 7 days ago`}>
+    <span className={`font-mono text-xs ${delta > 0 ? "text-win" : "text-loss"}`} title={fmt(plural(Math.abs(delta), t.common.rankMove), { dir: delta > 0 ? t.common.up : t.common.down })}>
       {delta > 0 ? "▲" : "▼"}
       {Math.abs(delta)}
     </span>
   );
 }
 
-export function StreakBadge({ streak }: { streak: { kind: "W" | "D" | "L"; length: number } | null }) {
+export async function StreakBadge({ streak }: { streak: { kind: "W" | "D" | "L"; length: number } | null }) {
   if (!streak || streak.length < 2) return null;
+  const { t } = await getT();
   const style = streak.kind === "W" ? "border-win/40 text-win bg-win/10" : streak.kind === "L" ? "border-loss/40 text-loss bg-loss/10" : "border-draw/40 text-draw";
   return (
-    <span className={`badge ${style}`} title={`${streak.length} ${streak.kind === "W" ? "wins" : streak.kind === "L" ? "losses" : "draws"} in a row`}>
+    <span className={`badge ${style}`} title={fmt(streak.kind === "W" ? t.common.streakWins : streak.kind === "L" ? t.common.streakLosses : t.common.streakDraws, { n: streak.length })}>
       {streak.kind === "W" ? "🔥" : ""}
       {streak.length}
       {streak.kind}
@@ -183,33 +190,37 @@ export function Pill({ children, tone = "muted" }: { children: ReactNode; tone?:
 }
 
 /** Club title (Novice … Club Grandmaster). Renders nothing for players without one yet. */
-export function TitleBadge({ title, compact = false }: { title: Title | null; compact?: boolean }) {
+export async function TitleBadge({ title, compact = false }: { title: Title | null; compact?: boolean }) {
   if (!title) return null;
+  const { t } = await getT();
+  const label = t.club.titles[title.key as keyof typeof t.club.titles] ?? title.label;
   return (
-    <span className="badge border-accent/40 text-accent bg-accent/5" title={`${title.label} · from ${title.min} Elo`}>
+    <span className="badge border-accent/40 text-accent bg-accent/5" title={fmt(t.common.titleFrom, { title: label, min: title.min })}>
       <span aria-hidden>{title.icon}</span>
-      {compact ? title.short : title.label}
+      {compact ? title.short : label}
     </span>
   );
 }
 
 /** One achievement, lit when earned and dimmed when still locked. */
-export function AchievementChip({ a, size = "sm" }: { a: Achievement; size?: "sm" | "lg" }) {
+export async function AchievementChip({ a, size = "sm" }: { a: Achievement; size?: "sm" | "lg" }) {
+  const { t, lang } = await getT();
   const earned = !!a.earnedAt;
-  const when = a.earnedAt ? new Date(a.earnedAt).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : null;
+  const when = a.earnedAt ? new Date(a.earnedAt).toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" }) : null;
+  const text = t.club.achievements[a.key as keyof typeof t.club.achievements] ?? { label: a.label, description: a.description };
   return (
     <span
       className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 ${size === "lg" ? "text-sm" : "text-xs"} ${
         earned ? "border-accent/40 bg-accent/10" : "border-line bg-panel-2/40 opacity-50 grayscale"
       }`}
-      title={`${a.description}${when ? ` · earned ${when}` : " · not yet earned"}`}
+      title={`${text.description} · ${when ? fmt(t.common.earnedOn, { date: when }) : t.common.notYetEarned}`}
     >
       <span className={size === "lg" ? "text-2xl leading-none" : "text-lg leading-none"} aria-hidden>
         {a.icon}
       </span>
       <span className="flex flex-col leading-tight text-left">
-        <span className="font-medium">{a.label}</span>
-        <span className="text-[10px] text-muted">{earned ? when : a.description}</span>
+        <span className="font-medium">{text.label}</span>
+        <span className="text-[10px] text-muted">{earned ? when : text.description}</span>
       </span>
     </span>
   );

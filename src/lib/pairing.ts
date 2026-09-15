@@ -85,9 +85,9 @@ function orderFor(mode: "random" | "swiss", pool: PairingCandidate[]): PairingCa
  * 1. Nobody gets the same color three times in a row if avoidable.
  * 2. The player with the lower (white - black) balance gets white.
  * 3. Whoever had black last gets white.
- * 4. Coin flip.
+ * 4. `tieBreak` — a coin flip by default; schedules that must be reproducible pass their own.
  */
-export function assignColors(a: string, b: string, colorStats: Map<string, ColorStats>): { whiteId: string; blackId: string } {
+export function assignColors(a: string, b: string, colorStats: Map<string, ColorStats>, tieBreak: () => boolean = () => Math.random() < 0.5): { whiteId: string; blackId: string } {
   const sa = colorStats.get(a) ?? EMPTY_COLOR;
   const sb = colorStats.get(b) ?? EMPTY_COLOR;
 
@@ -108,7 +108,7 @@ export function assignColors(a: string, b: string, colorStats: Map<string, Color
     if (sa.last === null) return { whiteId: a, blackId: b };
     return { whiteId: b, blackId: a };
   }
-  return Math.random() < 0.5 ? { whiteId: a, blackId: b } : { whiteId: b, blackId: a };
+  return tieBreak() ? { whiteId: a, blackId: b } : { whiteId: b, blackId: a };
 }
 
 export function generatePairings(input: PairingInput): PairingOutput {
@@ -175,8 +175,8 @@ export function roundRobinSchedule(ids: string[]): { pairs: { whiteId: string; b
         byeId = a === BYE ? b : a;
         continue;
       }
-      // Alternate the fixed player's color each round, otherwise balance.
-      const p = assignColors(a, b, stats);
+      // Deterministic tie-break (round parity) so the schedule is reproducible and colors provably balance.
+      const p = assignColors(a, b, stats, () => (r + i) % 2 === 0);
       pairs.push(p);
       bump(p.whiteId, "white");
       bump(p.blackId, "black");

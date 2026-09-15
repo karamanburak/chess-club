@@ -1,4 +1,6 @@
 import type { RatingPoint } from "@/lib/queries";
+import { getT } from "@/lib/lang";
+import { localeOf } from "@/lib/i18n";
 
 export interface Series {
   name: string;
@@ -13,9 +15,10 @@ export function seriesColor(i: number) {
 }
 
 /** Time-based rating chart for one or more players. */
-export function RatingChart({ series, height = 220, names }: { series: Series[]; height?: number; names?: Map<string, { name: string }> }) {
+export async function RatingChart({ series, height = 220, names }: { series: Series[]; height?: number; names?: Map<string, { name: string }> }) {
+  const { t: msg, lang } = await getT();
   const all = series.flatMap((s) => s.points);
-  if (all.length < 2) return <p className="text-sm text-muted">Rating history appears after the first rated game.</p>;
+  if (all.length < 2) return <p className="text-sm text-muted">{msg.stats.chart.empty}</p>;
 
   const w = 720;
   const h = height;
@@ -36,11 +39,11 @@ export function RatingChart({ series, height = 220, names }: { series: Series[];
   const ticks = 4;
   const tickVals = Array.from({ length: ticks + 1 }, (_, i) => Math.round(rMin + ((rMax - rMin) * i) / ticks));
   const dateTicks = Array.from({ length: 4 }, (_, i) => tMin + ((tMax - tMin) * i) / 3);
-  const fmt = (t: number) => new Date(t).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const fmt = (t: number) => new Date(t).toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short" });
 
   return (
     <div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto" role="img" aria-label="Rating history">
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto" role="img" aria-label={msg.stats.chart.label}>
         {tickVals.map((t) => (
           <g key={t}>
             <line x1={pad.l} x2={w - pad.r} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeWidth={1} />
@@ -65,7 +68,7 @@ export function RatingChart({ series, height = 220, names }: { series: Series[];
                 <circle key={i} cx={x(new Date(p.date).getTime())} cy={y(p.rating)} r={series.length > 1 ? 2 : 3} fill={s.color}>
                   <title>
                     {`${s.name}: ${p.rating} · ${p.date.slice(8, 10)}.${p.date.slice(5, 7)}.${p.date.slice(0, 4)}${
-                      p.opponentId && names ? ` · vs ${names.get(p.opponentId)?.name ?? "?"} (${p.score === 1 ? "win" : p.score === 0 ? "loss" : "draw"})` : ""
+                      p.opponentId && names ? ` · ${msg.stats.chart.vs} ${names.get(p.opponentId)?.name ?? "?"} (${p.score === 1 ? msg.stats.chart.win : p.score === 0 ? msg.stats.chart.loss : msg.stats.chart.draw})` : ""
                     }`}
                   </title>
                 </circle>

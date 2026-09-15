@@ -29,10 +29,12 @@ export async function proxy(req: NextRequest) {
 
   // First visit on this device: ask who they are (skippable). Presence is enough here; validity is checked on the server.
   const known = req.cookies.has(ME_COOKIE) || req.cookies.has(SKIP_COOKIE) || req.cookies.has(ADMIN_COOKIE);
-  if (!known && req.nextUrl.pathname !== "/me") return to("/me");
+  // The TV screen is a shared display, never a person: skip the identity prompt there.
+  if (!known && req.nextUrl.pathname !== "/me" && !req.nextUrl.pathname.startsWith("/tv")) return to("/me");
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/|favicon.ico|join|admin|api/).*)"],
+  // Static app assets (manifest, icons) must load without any cookie, otherwise "add to home screen" breaks.
+  matcher: ["/((?!_next/|favicon.ico|manifest.webmanifest|icons/|join|admin|api/).*)"],
 };

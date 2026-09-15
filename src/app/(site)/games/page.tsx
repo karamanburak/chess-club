@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { readDb } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
 import { deleteGame } from "@/lib/actions";
 import { completedGames, formatDateTime, formatMonth, monthsWithGames, playerMap, resultLabel } from "@/lib/queries";
 import { ConfirmButton } from "@/components/ConfirmButton";
@@ -13,6 +15,7 @@ const PAGE = 50;
 
 export default async function GamesPage({ searchParams }: PageProps<"/games">) {
   const sp = await searchParams;
+  const { t, lang } = await getT();
   const db = await readDb();
   const admin = await isAdmin();
   const names = playerMap(db);
@@ -43,21 +46,21 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
   return (
     <>
       <PageHeader
-        eyebrow="History"
-        title="Games"
-        subtitle={<span>{total} games{q || kind !== "all" || month ? " match" : ""}, newest first</span>}
+        eyebrow={t.games.eyebrow}
+        title={t.games.title}
+        subtitle={<span>{plural(total, q || kind !== "all" || month ? t.games.countMatch : t.games.countAll)}</span>}
         actions={
           <Suspense>
-            <SearchBox placeholder="Search player…" />
+            <SearchBox placeholder={t.games.searchPlaceholder} />
           </Suspense>
         }
       />
       <div className="flex flex-wrap items-center gap-2 mb-4 no-print">
         {[
-          ["all", "All"],
-          ["night", "Club nights"],
-          ["tournament", "Tournaments"],
-          ["friendly", "Friendlies"],
+          ["all", t.games.filterAll],
+          ["night", t.games.filterNights],
+          ["tournament", t.games.filterTournaments],
+          ["friendly", t.games.filterFriendlies],
         ].map(([k, l]) => (
           <Link key={k} href={link({ kind: k })} className={`btn btn-sm ${kind === k ? "btn-primary" : ""}`}>
             {l}
@@ -65,41 +68,41 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
         ))}
         <span className="mx-1 text-line">|</span>
         <Link href={link({ month: "" })} className={`btn btn-sm ${!month ? "btn-primary" : "btn-ghost"}`}>
-          Any month
+          {t.games.anyMonth}
         </Link>
         {monthsWithGames(db)
           .slice(0, 6)
           .map((m) => (
             <Link key={m} href={link({ month: m })} className={`btn btn-sm ${month === m ? "btn-primary" : "btn-ghost"}`}>
-              {formatMonth(m).slice(0, 3)} {m.slice(2, 4)}
+              {formatMonth(m, lang).slice(0, 3)} {m.slice(2, 4)}
             </Link>
           ))}
       </div>
 
-      <Section title="Results" flush right={pages > 1 ? <Pager page={page} pages={pages} link={link} /> : undefined}>
+      <Section title={t.games.results} flush right={pages > 1 ? <Pager page={page} pages={pages} link={link} labels={{ prev: t.games.prevPage, next: t.games.nextPage }} /> : undefined}>
         {games.length === 0 ? (
-          <Empty icon="♝" title="No games">Nothing matches these filters.</Empty>
+          <Empty icon="list" title={t.games.noGames}>{t.games.noMatch}</Empty>
         ) : (
           <div className="scroll-x">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th className="text-right">⚪ White</th>
-                  <th className="text-center">Result</th>
-                  <th>⚫ Black</th>
-                  <th className="hidden sm:table-cell">Event</th>
+                  <th>{t.games.date}</th>
+                  <th className="text-right">⚪ {t.common.white}</th>
+                  <th className="text-center">{t.common.result}</th>
+                  <th>⚫ {t.common.black}</th>
+                  <th className="hidden sm:table-cell">{t.games.event}</th>
                   {admin && <th></th>}
                 </tr>
               </thead>
               <tbody>
                 {games.map((g) => {
-                  const t = g.tournamentId ? tournaments.get(g.tournamentId) : null;
+                  const tr = g.tournamentId ? tournaments.get(g.tournamentId) : null;
                   const ww = g.result === "1-0" || g.result === "+/-";
                   const bw = g.result === "0-1" || g.result === "-/+";
                   return (
                     <tr key={g.id} className="hover:bg-panel-2/50">
-                      <td className="text-muted text-xs whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt)}</td>
+                      <td className="text-muted text-xs whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
                       <td className={`text-right nowrap ${ww ? "font-semibold" : bw ? "text-muted" : ""}`}>
                         <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} className="mr-2" />
                         <PlayerLink id={g.whiteId} name={names.get(g.whiteId)?.name ?? "?"} />
@@ -114,24 +117,24 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
                         <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-2" />
                       </td>
                       <td className="text-xs text-muted hidden sm:table-cell">
-                        {t ? (
-                          <Link href={`/tournaments/${t.id}`} className="hover:text-accent">
-                            {t.name} · R{g.round}
+                        {tr ? (
+                          <Link href={`/tournaments/${tr.id}`} className="hover:text-accent">
+                            {tr.name} · {fmt(t.games.roundShort, { n: g.round })}
                           </Link>
                         ) : g.sessionId ? (
                           <Link href={`/pairing/${g.sessionId}`} className="hover:text-accent">
-                            Club night
+                            {t.common.clubNight}
                           </Link>
                         ) : (
-                          "friendly"
+                          t.games.friendly
                         )}
-                        {!g.rated && <span className="ml-1 badge border-muted/40">unrated</span>}
+                        {!g.rated && <span className="ml-1 badge border-muted/40">{t.common.unrated}</span>}
                       </td>
                       {admin && (
                         <td className="text-right">
-                          {!t && (
-                            <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel="Delete">
-                              Delete
+                          {!tr && (
+                            <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel={t.common.delete}>
+                              {t.common.delete}
                             </ConfirmButton>
                           )}
                         </td>
@@ -145,7 +148,7 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
         )}
         {pages > 1 && (
           <div className="px-5 py-3 border-t border-line flex justify-end">
-            <Pager page={page} pages={pages} link={link} />
+            <Pager page={page} pages={pages} link={link} labels={{ prev: t.games.prevPage, next: t.games.nextPage }} />
           </div>
         )}
       </Section>
@@ -153,16 +156,16 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
   );
 }
 
-function Pager({ page, pages, link }: { page: number; pages: number; link: (o: Record<string, string | number | undefined>) => string }) {
+function Pager({ page, pages, link, labels }: { page: number; pages: number; link: (o: Record<string, string | number | undefined>) => string; labels: { prev: string; next: string } }) {
   return (
     <span className="inline-flex items-center gap-1 text-xs">
-      <Link href={link({ page: Math.max(1, page - 1) })} className={`btn btn-sm ${page === 1 ? "pointer-events-none opacity-40" : ""}`}>
+      <Link href={link({ page: Math.max(1, page - 1) })} className={`btn btn-sm ${page === 1 ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.prev}>
         ←
       </Link>
       <span className="text-muted px-2 font-mono">
         {page} / {pages}
       </span>
-      <Link href={link({ page: Math.min(pages, page + 1) })} className={`btn btn-sm ${page === pages ? "pointer-events-none opacity-40" : ""}`}>
+      <Link href={link({ page: Math.min(pages, page + 1) })} className={`btn btn-sm ${page === pages ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.next}>
         →
       </Link>
     </span>

@@ -4,15 +4,14 @@ import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { migrate, mutate, newId, nextSeq, readBackup, readDb, replaceDb } from "./db";
+import { migrate, mutate, newId, readBackup, readDb, replaceDb } from "./db";
 import { RESULTS, recomputeRatings } from "./elo";
-import { assignColors, bracketSeedOrder, generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
+import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
   activeParticipants,
   activeSession,
   colorStats,
   knockoutRounds,
-  matchState,
   previousPairs,
   resultLabel,
   roundComplete,
@@ -24,11 +23,15 @@ import {
 } from "./queries";
 import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, hashPassword, isAdmin, requireAdmin, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
 import { UserError } from "./errors";
+import { makeGame } from "./games";
+import { generateKnockoutRound, syncKnockout } from "./knockout";
 import { isAvatar, randomAvatar } from "./avatar";
 import { clearPinFails, PIN_RE, pinLocked, registerPinFail } from "./pin";
 import { SKIP_COOKIE, SKIP_DAYS } from "./tokens";
+import { fmt, isLang, LANG_COOKIE, type Dict, type Lang } from "./i18n";
+import { getT } from "./lang";
 import { currentSeason, seasonTable } from "./club";
-import type { Database, Game, GameResult, KnockoutMatch, PairingMode, TiebreakKey, Tournament } from "./types";
+import type { Database, Game, GameResult, PairingMode, TiebreakKey, Tournament } from "./types";
 
 function str(fd: FormData, key: string): string {
   const v = fd.get(key);
@@ -40,8 +43,15 @@ function num(fd: FormData, key: string, fallback: number): number {
   return Number.isFinite(n) && str(fd, key) !== "" ? n : fallback;
 }
 
-function parseResult(value: string): GameResult {
-  if (!RESULTS.includes(value as GameResult)) throw new UserError(`Invalid result: ${value}`);
+type Msgs = Dict["errors"];
+
+/** The user-facing messages in this request's language. Fetch it before mutate(): its callback is synchronous. */
+async function msgs(): Promise<Msgs> {
+  return (await getT()).t.errors;
+}
+
+function parseResult(value: string, E: Msgs): GameResult {
+  if (!RESULTS.includes(value as GameResult)) throw new UserError(fmt(E.invalidResult, { value }));
   return value as GameResult;
 }
 
@@ -124,9 +134,9 @@ function localToday(): string {
 }
 
 /** A "YYYY-MM-DD" from a form. Empty or today means right now; an earlier day is stamped at noon so it sorts before today's games. */
-function playedAt(date: string): string {
+function playedAt(date: string, E: Msgs): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date === localToday()) return new Date().toISOString();
-  if (date > localToday()) throw new UserError("The game date cannot be in the future.");
+  if (date > localToday()) throw new UserError(E.dateInFuture);
   return new Date(`${date}T12:00:00`).toISOString();
 }
 
@@ -139,19 +149,14 @@ function tiebreaksFrom(fd: FormData, fallback: TiebreakKey[]): TiebreakKey[] {
   return preset ? [...preset.order] : fallback;
 }
 
-function makeGame(db: Database, fields: Pick<Game, "whiteId" | "blackId" | "rated" | "tournamentId" | "round" | "board" | "sessionId">): Game {
-  return {
-    id: newId(),
-    seq: nextSeq(db),
-    result: null,
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    whiteRatingBefore: null,
-    blackRatingBefore: null,
-    whiteRatingAfter: null,
-    blackRatingAfter: null,
-    ...fields,
-  };
+
+/** Per-device UI language (EN/DE), kept in a plain cookie for a year. */
+export async function setLanguage(lang: Lang) {
+  return attempt(async () => {
+    if (!isLang(lang)) throw new UserError((await msgs()).unknownLanguage);
+    const jar = await cookies();
+    jar.set(LANG_COOKIE, lang, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -160,7 +165,7 @@ function makeGame(db: Database, fields: Pick<Game, "whiteId" | "blackId" | "rate
 
 export async function setupAdmin(fd: FormData) {
   return run(async () => {
-    if (await adminConfigured()) throw new UserError("Admin password is already set.");
+    if (await adminConfigured()) throw new UserError((await msgs()).adminAlreadySet);
     const pw = str(fd, "password");
     if (pw.length < 4) redirect("/admin?error=short");
     if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
@@ -216,7 +221,9 @@ export async function updateSettings(fd: FormData) {
       db.settings.startRating = Math.round(num(fd, "startRating", db.settings.startRating));
       db.settings.byePoints = str(fd, "byePoints") === "0.5" ? 0.5 : 1;
       db.settings.defaultTiebreaks = tiebreaksFrom(fd, db.settings.defaultTiebreaks);
-      log(db, `Settings changed: start Elo ${db.settings.startRating}, bye ${db.settings.byePoints}, tiebreaks ${db.settings.defaultTiebreaks.join("/")}`);
+      const language = str(fd, "language");
+      db.settings.language = isLang(language) ? language : "en";
+      log(db, `Settings changed: start Elo ${db.settings.startRating}, bye ${db.settings.byePoints}, tiebreaks ${db.settings.defaultTiebreaks.join("/")}, language ${db.settings.language}`);
     });
     revalidateAll();
     redirect("/admin?ok=saved");
@@ -253,9 +260,10 @@ export async function importDatabase(fd: FormData) {
 export async function restoreBackup(file: string) {
   return run(async () => {
     await requireAdmin();
-    if (!/^db-[\w-]+\.json$/.test(file)) throw new UserError("Invalid backup name.");
+    const E = await msgs();
+    if (!/^db-[\w-]+\.json$/.test(file)) throw new UserError(E.invalidBackupName);
     const next = await readBackup(file);
-    if (!next) throw new UserError("Backup not found.");
+    if (!next) throw new UserError(E.backupNotFound);
     const current = await readDb();
     next.settings.adminPasswordHash = current.settings.adminPasswordHash;
     next.settings.sessionSecret = current.settings.sessionSecret;
@@ -270,14 +278,13 @@ export async function restoreBackup(file: string) {
 export async function updateClub(fd: FormData) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     await mutate((db) => {
       const c = db.settings.club;
       c.name = str(fd, "name") || c.name;
-      c.motto = str(fd, "motto");
-      c.founded = str(fd, "founded");
       c.meets = str(fd, "meets");
       const next = str(fd, "nextNight");
-      if (next && !/^\d{4}-\d{2}-\d{2}$/.test(next)) throw new UserError("The next club night needs a date.");
+      if (next && !/^\d{4}-\d{2}-\d{2}$/.test(next)) throw new UserError(E.nextNightNeedsDate);
       c.nextNight = next;
       c.announcement = str(fd, "announcement").slice(0, 300);
       log(db, `Club identity edited: ${c.name}`);
@@ -341,13 +348,14 @@ export async function joinClub(fd: FormData) {
 export async function startSeason(fd: FormData) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     await mutate((db) => {
-      if (currentSeason(db)) throw new UserError("Close the current season before starting a new one.");
+      if (currentSeason(db)) throw new UserError(E.closeSeasonFirst);
       const start = str(fd, "start") || localToday();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) throw new UserError("The season needs a start date.");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) throw new UserError(E.seasonNeedsStart);
       const lastEnd = db.seasons.map((s) => s.end ?? "").sort().at(-1) ?? "";
-      if (lastEnd && start <= lastEnd) throw new UserError(`The new season must start after ${lastEnd}, when the previous one ended.`);
-      const name = str(fd, "name") || `Season ${start.slice(0, 4)}`;
+      if (lastEnd && start <= lastEnd) throw new UserError(fmt(E.seasonMustStartAfter, { date: lastEnd }));
+      const name = str(fd, "name") || fmt(E.defaultSeasonName, { year: start.slice(0, 4) });
       db.seasons.push({ id: newId(), name, start, end: null, championId: null });
       log(db, `${name} started (${start})`);
     });
@@ -360,10 +368,11 @@ export async function startSeason(fd: FormData) {
 export async function closeSeason(id: string) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     await mutate((db) => {
       const s = db.seasons.find((x) => x.id === id);
       if (!s) return;
-      if (s.end) throw new UserError("This season is already closed.");
+      if (s.end) throw new UserError(E.seasonAlreadyClosed);
       const end = localToday();
       s.end = end < s.start ? s.start : end;
       const table = seasonTable(db, s);
@@ -377,12 +386,13 @@ export async function closeSeason(id: string) {
 export async function reopenSeason(id: string) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     await mutate((db) => {
       const s = db.seasons.find((x) => x.id === id);
       if (!s) return;
-      if (currentSeason(db)) throw new UserError("Another season is running. Close it first.");
+      if (currentSeason(db)) throw new UserError(E.anotherSeasonRunning);
       const later = db.seasons.some((x) => x.id !== id && x.start > s.start);
-      if (later) throw new UserError("Only the most recent season can be reopened.");
+      if (later) throw new UserError(E.onlyLatestSeasonReopens);
       s.end = null;
       s.championId = null;
       log(db, `${s.name} reopened`);
@@ -394,11 +404,12 @@ export async function reopenSeason(id: string) {
 export async function renameSeason(id: string, fd: FormData) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     await mutate((db) => {
       const s = db.seasons.find((x) => x.id === id);
       if (!s) return;
       const name = str(fd, "name");
-      if (!name) throw new UserError("A season needs a name.");
+      if (!name) throw new UserError(E.seasonNeedsName);
       log(db, `Season "${s.name}" renamed to "${name}"`);
       s.name = name;
     });
@@ -416,8 +427,9 @@ export async function addPlayer(fd: FormData) {
     await requireAdmin();
     const name = str(fd, "name");
     if (!name) return;
+    const E = await msgs();
     await mutate((db) => {
-      if (db.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) throw new UserError(`A player named "${name}" already exists.`);
+      if (db.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) throw new UserError(fmt(E.playerExists, { name }));
       const rating = num(fd, "rating", db.settings.startRating);
       db.players.push({
         id: newId(),
@@ -462,13 +474,14 @@ export async function updatePlayer(id: string, fd: FormData) {
 /** Changes a profile picture: the player themselves (device claimed via "This is me") or the admin. */
 export async function setAvatar(id: string, seed: string) {
   return attempt(async () => {
+    const E = await msgs();
     if (!(await isAdmin()) && (await currentPlayerId()) !== id) {
-      throw new UserError("Only this player can change their avatar. Open your own profile and click “This is me” first.");
+      throw new UserError(E.avatarNotYours);
     }
-    if (!isAvatar(seed)) throw new UserError("That avatar is not valid.");
+    if (!isAvatar(seed)) throw new UserError(E.invalidAvatar);
     await mutate((db) => {
       const p = db.players.find((x) => x.id === id);
-      if (!p) throw new UserError("Player not found.");
+      if (!p) throw new UserError(E.playerNotFound);
       p.avatar = seed;
       log(db, `Player ${p.name} got a new avatar`);
     });
@@ -483,16 +496,17 @@ export async function setAvatar(id: string, seed: string) {
 /** A newcomer adds themselves once: name plus PIN, and this device becomes theirs right away. */
 export async function registerSelf(fd: FormData) {
   return run(async () => {
-    if (await currentPlayerId()) throw new UserError("This device already belongs to a player. Use “Not me” on that profile first.");
+    const E = await msgs();
+    if (await currentPlayerId()) throw new UserError(E.deviceAlreadyClaimed);
     const name = str(fd, "name");
-    if (name.length < 2) throw new UserError("Please enter your name.");
+    if (name.length < 2) throw new UserError(E.enterName);
     const pin = str(fd, "pin");
-    if (!PIN_RE.test(pin)) throw new UserError("A PIN is exactly 4 digits.");
-    if (pin !== str(fd, "confirm")) throw new UserError("The two PINs do not match.");
+    if (!PIN_RE.test(pin)) throw new UserError(E.pinFormat);
+    if (pin !== str(fd, "confirm")) throw new UserError(E.pinMismatch);
     const id = newId();
     await mutate((db) => {
       if (db.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
-        throw new UserError(`“${name}” is already on the list. If that is you, pick your face under “Who are you?”.`);
+        throw new UserError(fmt(E.nameAlreadyListed, { name }));
       }
       const rating = db.settings.startRating;
       db.players.push({
@@ -514,7 +528,7 @@ export async function registerSelf(fd: FormData) {
     });
     await setMeCookie(id);
     revalidateAll();
-    redirect(noticeUrl(`/players/${id}`, `Welcome to the club, ${name}. Pick a face you like by clicking your avatar.`));
+    redirect(noticeUrl(`/players/${id}`, fmt(E.welcomeNew, { name })));
   });
 }
 
@@ -532,15 +546,16 @@ export async function claimWithPin(fd: FormData) {
     const pin = str(fd, "pin");
     const next = str(fd, "next").startsWith("/") ? str(fd, "next") : "";
     const back = (error: string): never => redirect(`/me?player=${encodeURIComponent(id)}&error=${error}${next ? `&next=${encodeURIComponent(next)}` : ""}`);
+    const E = await msgs();
     const db = await readDb();
     const p = db.players.find((x) => x.id === id);
-    if (!p) throw new UserError("Player not found.");
+    if (!p) throw new UserError(E.playerNotFound);
     if (!PIN_RE.test(pin)) back("short");
     if (!p.pinHash) {
       if (pin !== str(fd, "confirm")) back("mismatch");
       await mutate((d) => {
         const q = d.players.find((x) => x.id === id)!;
-        if (q.pinHash) throw new UserError("A PIN was set for this player a moment ago. Enter it instead.");
+        if (q.pinHash) throw new UserError(E.pinJustSet);
         q.pinHash = hashPassword(pin);
         log(d, `${q.name} set their PIN and claimed their profile`);
       });
@@ -560,7 +575,7 @@ export async function claimWithPin(fd: FormData) {
     }
     await setMeCookie(id);
     revalidateAll();
-    redirect(noticeUrl(next || `/players/${id}`, `Welcome back, ${p.name}. This device now knows you.`));
+    redirect(noticeUrl(next || `/players/${id}`, fmt(E.welcomeBack, { name: p.name })));
   });
 }
 
@@ -578,15 +593,16 @@ export async function skipIdentity(fd: FormData) {
 export async function changeOwnPin(fd: FormData) {
   return run(async () => {
     const id = str(fd, "playerId");
-    if ((await currentPlayerId()) !== id) throw new UserError("Only this player can change their PIN.");
+    const E = await msgs();
+    if ((await currentPlayerId()) !== id) throw new UserError(E.pinNotYours);
     const current = str(fd, "current");
     const pin = str(fd, "pin");
-    if (!PIN_RE.test(pin)) throw new UserError("The new PIN must be exactly 4 digits.");
-    if (pin !== str(fd, "confirm")) throw new UserError("The two new PINs do not match.");
+    if (!PIN_RE.test(pin)) throw new UserError(E.newPinFormat);
+    if (pin !== str(fd, "confirm")) throw new UserError(E.newPinMismatch);
     const db = await readDb();
     const p = db.players.find((x) => x.id === id);
-    if (!p) throw new UserError("Player not found.");
-    if (p.pinHash && !verifyPassword(current, p.pinHash)) throw new UserError("The current PIN is wrong.");
+    if (!p) throw new UserError(E.playerNotFound);
+    if (p.pinHash && !verifyPassword(current, p.pinHash)) throw new UserError(E.currentPinWrong);
     await mutate((d) => {
       const q = d.players.find((x) => x.id === id)!;
       q.pinHash = hashPassword(pin);
@@ -594,7 +610,7 @@ export async function changeOwnPin(fd: FormData) {
       log(d, `${q.name} changed their PIN`);
     });
     revalidateAll();
-    redirect(noticeUrl(`/players/${id}`, "PIN changed."));
+    redirect(noticeUrl(`/players/${id}`, E.pinChanged));
   });
 }
 
@@ -602,18 +618,19 @@ export async function changeOwnPin(fd: FormData) {
 export async function resetPin(id: string, fd: FormData) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     const pin = str(fd, "pin");
-    if (pin && !PIN_RE.test(pin)) throw new UserError("A PIN is exactly 4 digits. Leave it empty to let the player choose one.");
+    if (pin && !PIN_RE.test(pin)) throw new UserError(E.pinFormatOrEmpty);
     await mutate((d) => {
       const q = d.players.find((x) => x.id === id);
-      if (!q) throw new UserError("Player not found.");
+      if (!q) throw new UserError(E.playerNotFound);
       if (pin) q.pinHash = hashPassword(pin);
       else delete q.pinHash;
       clearPinFails(q);
       log(d, pin ? `Admin set a new PIN for ${q.name}` : `Admin cleared the PIN of ${q.name}; they choose a new one on their next claim`);
     });
     revalidateAll();
-    redirect(noticeUrl(`/players/${id}`, pin ? "New PIN set. Tell the player in person." : "PIN cleared. The player sets a new one the next time they say “This is me”."));
+    redirect(noticeUrl(`/players/${id}`, pin ? E.pinSetByAdmin : E.pinCleared));
   });
 }
 
@@ -662,14 +679,15 @@ export async function deletePlayer(id: string) {
 
 export async function recordFriendlyGame(fd: FormData) {
   return run(async () => {
+    const E = await msgs();
     const whiteId = str(fd, "whiteId");
     const blackId = str(fd, "blackId");
-    const result = parseResult(str(fd, "result"));
+    const result = parseResult(str(fd, "result"), E);
     if (!whiteId || !blackId || whiteId === blackId) return;
     await mutate((db) => {
       const g = makeGame(db, { whiteId, blackId, rated: fd.get("rated") !== "off", tournamentId: null, round: null, board: null, sessionId: null });
       g.result = result;
-      const when = playedAt(str(fd, "date"));
+      const when = playedAt(str(fd, "date"), E);
       g.createdAt = when;
       g.completedAt = when;
       db.games.push(g);
@@ -682,13 +700,14 @@ export async function recordFriendlyGame(fd: FormData) {
 
 export async function setGameResult(gameId: string, result: GameResult | null) {
   return attempt(async () => {
-    if (result !== null) parseResult(result);
+    const E = await msgs();
+    if (result !== null) parseResult(result, E);
     await mutate((db) => {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
       const t = g.tournamentId ? db.tournaments.find((x) => x.id === g.tournamentId) : undefined;
       if (t?.knockout && g.round !== null && g.round < t.rounds.length) {
-        throw new UserError("This knockout round is locked because the next round has already been drawn. Delete the later round first.");
+        throw new UserError(E.knockoutRoundLocked);
       }
       g.result = result;
       g.completedAt = result ? (g.completedAt ?? new Date().toISOString()) : null;
@@ -702,10 +721,11 @@ export async function setGameResult(gameId: string, result: GameResult | null) {
 
 export async function swapColors(gameId: string) {
   return attempt(async () => {
+    const E = await msgs();
     await mutate((db) => {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
-      if (g.result) throw new UserError("Clear the result before swapping colors.");
+      if (g.result) throw new UserError(E.clearResultBeforeSwap);
       [g.whiteId, g.blackId] = [g.blackId, g.whiteId];
       log(db, `${whereOf(db, g)}: colors swapped, ${nameOf(db, g.whiteId)} now white against ${nameOf(db, g.blackId)}`);
       for (const t of db.tournaments)
@@ -722,10 +742,11 @@ export async function swapColors(gameId: string) {
 export async function deleteGame(gameId: string) {
   return run(async () => {
     await requireAdmin();
+    const E = await msgs();
     await mutate((db) => {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
-      if (g.tournamentId) throw new UserError("Tournament games are removed by deleting the round.");
+      if (g.tournamentId) throw new UserError(E.tournamentGamesViaRound);
       log(db, `${whereOf(db, g)}: game ${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)} deleted`);
       db.games = db.games.filter((x) => x.id !== gameId);
       for (const s of db.sessions) for (const r of s.rounds) r.pairings = r.pairings.filter((p) => p.gameId !== gameId);
@@ -820,10 +841,11 @@ export async function updateTournament(id: string, fd: FormData) {
 
 export async function setParticipants(id: string, fd: FormData) {
   return run(async () => {
+    const E = await msgs();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
-      if ((t.pairingMode === "roundrobin" || t.pairingMode === "knockout") && t.rounds.length) throw new UserError("The field is fixed once this format has started.");
+      if ((t.pairingMode === "roundrobin" || t.pairingMode === "knockout") && t.rounds.length) throw new UserError(E.fieldFixed);
       const chosen = new Set(fd.getAll("participantIds").map(String));
       const locked = new Set<string>();
       for (const r of t.rounds) {
@@ -866,13 +888,14 @@ export async function toggleWithdraw(id: string, playerId: string) {
 
 export async function generateNextRound(id: string) {
   return run(async () => {
-    await mutate((db) => {
+    const E = await msgs();
+    const round = await mutate((db): number | undefined => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
-      if (t.status === "finished") throw new UserError("Tournament is finished.");
+      if (t.status === "finished") throw new UserError(E.tournamentFinished);
       const last = t.rounds[t.rounds.length - 1];
-      if (last && !roundComplete(db, t, last.number)) throw new UserError("Enter all results of the current round first.");
-      if (t.rounds.length >= t.plannedRounds) throw new UserError("All planned rounds have been played. Increase the round count to continue.");
+      if (last && !roundComplete(db, t, last.number)) throw new UserError(E.enterAllResultsFirst);
+      if (t.rounds.length >= t.plannedRounds) throw new UserError(E.allRoundsPlayed);
       const roundNumber = t.rounds.length + 1;
       log(db, `Tournament "${t.name}": round ${roundNumber} drawn`);
 
@@ -880,18 +903,18 @@ export async function generateNextRound(id: string) {
       let byeId: string | null;
 
       if (t.pairingMode === "knockout") {
-        generateKnockoutRound(db, t);
+        generateKnockoutRound(db, t, E);
         t.status = "running";
         recomputeRatings(db);
-        return;
+        return t.rounds.length;
       }
 
       if (t.pairingMode === "roundrobin") {
-        if (t.participantIds.length < 2) throw new UserError("At least two participants are needed.");
+        if (t.participantIds.length < 2) throw new UserError(E.twoParticipants);
         if (!t.rrOrder || !t.rounds.length) t.rrOrder = shuffle(t.participantIds);
         const schedule = roundRobinSchedule(t.rrOrder);
         const r = schedule[roundNumber - 1];
-        if (!r) throw new UserError("Round robin schedule is complete.");
+        if (!r) throw new UserError(E.roundRobinComplete);
         const withdrawn = new Set(t.withdrawnIds);
         pairs = r.pairs.filter((p) => !withdrawn.has(p.whiteId) && !withdrawn.has(p.blackId));
         byeId = r.byeId && !withdrawn.has(r.byeId) ? r.byeId : null;
@@ -909,7 +932,7 @@ export async function generateNextRound(id: string) {
         }
       } else {
         const active = activeParticipants(t);
-        if (active.length < 2) throw new UserError("At least two active participants are needed.");
+        if (active.length < 2) throw new UserError(E.twoActiveParticipants);
         const table = standings(db, t).filter((r) => !r.withdrawn);
         const byeHistory = new Set(t.rounds.map((r) => r.byePlayerId).filter((x): x is string => !!x));
         const out = generatePairings({
@@ -938,26 +961,29 @@ export async function generateNextRound(id: string) {
       t.rounds.push({ number: roundNumber, pairings, byePlayerId: byeId, createdAt: new Date().toISOString() });
       t.status = "running";
       recomputeRatings(db);
+      return roundNumber;
     });
     revalidateAll();
+    if (round) redirect(`/tournaments/${id}?reveal=${round}`); // one-time board reveal, see PairingReveal
   });
 }
 
 /** Manually rewrite the boards of a round that has no results yet. */
 export async function updateRoundPairings(id: string, roundNumber: number, fd: FormData) {
   return run(async () => {
+    const E = await msgs();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
       const round = t.rounds.find((r) => r.number === roundNumber);
       if (!round) return;
-      if (t.pairingMode === "knockout") throw new UserError("Knockout brackets cannot be edited by hand.");
-      if (roundHasResults(db, round)) throw new UserError("This round already has results. Clear them before editing pairings.");
+      if (t.pairingMode === "knockout") throw new UserError(E.knockoutNoManualEdit);
+      if (roundHasResults(db, round)) throw new UserError(E.roundHasResultsClearFirst);
 
       const seen = new Set<string>();
       const use = (pid: string) => {
         if (!pid) return;
-        if (seen.has(pid)) throw new UserError("A player appears on two boards.");
+        if (seen.has(pid)) throw new UserError(E.playerOnTwoBoards);
         seen.add(pid);
       };
       const newPairs: { whiteId: string; blackId: string }[] = [];
@@ -965,8 +991,8 @@ export async function updateRoundPairings(id: string, roundNumber: number, fd: F
         const w = str(fd, `white_${i}`);
         const b = str(fd, `black_${i}`);
         if (!w && !b) continue;
-        if (!w || !b) throw new UserError(`Board ${i + 1} needs two players.`);
-        if (w === b) throw new UserError(`Board ${i + 1} has the same player twice.`);
+        if (!w || !b) throw new UserError(fmt(E.boardNeedsTwo, { n: i + 1 }));
+        if (w === b) throw new UserError(fmt(E.boardSamePlayer, { n: i + 1 }));
         use(w);
         use(b);
         newPairs.push({ whiteId: w, blackId: b });
@@ -1039,13 +1065,13 @@ export async function deleteTournament(id: string) {
 /* Club nights                                                         */
 /* ------------------------------------------------------------------ */
 
-function pairSessionRound(db: Database, sessionId: string) {
+function pairSessionRound(db: Database, sessionId: string, E: Msgs): number {
   const s = db.sessions.find((x) => x.id === sessionId);
-  if (!s) throw new UserError("Session not found.");
+  if (!s) throw new UserError(E.sessionNotFound);
   const present = s.presentIds.filter((id) => db.players.some((p) => p.id === id));
-  if (present.length < 2) throw new UserError("At least two players must be present.");
+  if (present.length < 2) throw new UserError(E.twoPresent);
   const last = s.rounds[s.rounds.length - 1];
-  if (last && !sessionRoundComplete(db, last)) throw new UserError("Finish the current round first.");
+  if (last && !sessionRoundComplete(db, last)) throw new UserError(E.finishRoundFirst);
 
   const byeHistory = new Set(s.rounds.map((r) => r.byePlayerId).filter((x): x is string => !!x));
   const ratingOf = new Map(db.players.map((p) => [p.id, p.rating]));
@@ -1065,14 +1091,16 @@ function pairSessionRound(db: Database, sessionId: string) {
   });
   s.rounds.push({ number, pairings, byePlayerId: byeId, createdAt: new Date().toISOString() });
   log(db, `Club night: round ${number} paired, ${pairings.length} boards${byeId ? `, bye ${nameOf(db, byeId)}` : ""}`);
+  return number;
 }
 
 export async function sessionStart(fd: FormData) {
   return run(async () => {
     const ids = [...new Set(fd.getAll("playerIds").map(String))];
     if (ids.length < 2) return;
-    await mutate((db) => {
-      if (activeSession(db)) throw new UserError("A club night is already running. Close it first.");
+    const E = await msgs();
+    const round = await mutate((db) => {
+      if (activeSession(db)) throw new UserError(E.nightAlreadyRunning);
       const s = {
         id: newId(),
         createdAt: new Date().toISOString(),
@@ -1084,34 +1112,39 @@ export async function sessionStart(fd: FormData) {
       };
       db.sessions.push(s);
       log(db, `Club night started with ${ids.length} players${s.rated ? "" : " (unrated)"}`);
-      pairSessionRound(db, s.id);
+      return pairSessionRound(db, s.id, E);
     });
     revalidateAll();
+    redirect(`/pairing?reveal=${round}`); // plays the board draw once, see PairingReveal
   });
 }
 
 export async function sessionNextRound(id: string) {
   return run(async () => {
-    await mutate((db) => pairSessionRound(db, id));
+    const E = await msgs();
+    const round = await mutate((db) => pairSessionRound(db, id, E));
     revalidateAll();
+    redirect(`/pairing?reveal=${round}`);
   });
 }
 
 /** Regenerates the current round as long as no result has been entered. */
 export async function sessionRepair(id: string) {
   return run(async () => {
-    await mutate((db) => {
+    const E = await msgs();
+    const round = await mutate((db): number | undefined => {
       const s = db.sessions.find((x) => x.id === id);
       if (!s || !s.rounds.length) return;
       const last = s.rounds[s.rounds.length - 1];
-      if (roundHasResults(db, last)) throw new UserError("This round already has results.");
+      if (roundHasResults(db, last)) throw new UserError(E.roundHasResults);
       const ids = new Set(last.pairings.map((p) => p.gameId));
       db.games = db.games.filter((g) => !ids.has(g.id));
       s.rounds.pop();
       log(db, `Club night: round ${last.number} dissolved for re-pairing`);
-      pairSessionRound(db, s.id);
+      return pairSessionRound(db, s.id, E);
     });
     revalidateAll();
+    if (round) redirect(`/pairing?reveal=${round}`);
   });
 }
 
@@ -1228,125 +1261,3 @@ export async function sessionDeleteLastRound(id: string) {
 /* ------------------------------------------------------------------ */
 /* Knockout helpers                                                    */
 /* ------------------------------------------------------------------ */
-
-function addMatchGame(db: Database, t: Tournament, m: KnockoutMatch, round: Tournament["rounds"][number]) {
-  if (!m.a || !m.b) return;
-  // Alternate colors game by game; the first game is balanced on history.
-  const games = new Map(db.games.map((g) => [g.id, g]));
-  const lastGame = m.gameIds.length ? games.get(m.gameIds[m.gameIds.length - 1]) : undefined;
-  const colors = lastGame
-    ? { whiteId: lastGame.blackId, blackId: lastGame.whiteId }
-    : assignColors(m.a, m.b, colorStats(db, { tournamentId: t.id }));
-  const board = round.pairings.length + 1;
-  const g = makeGame(db, { ...colors, rated: t.rated, tournamentId: t.id, round: m.round, board, sessionId: null });
-  db.games.push(g);
-  m.gameIds.push(g.id);
-  round.pairings.push({ board, whiteId: g.whiteId, blackId: g.blackId, gameId: g.id });
-}
-
-/** Keeps every match consistent with its games: adds tiebreak games on ties, removes stale ones, sets winners. */
-function syncKnockout(db: Database, t: Tournament) {
-  const ko = t.knockout;
-  if (!ko) return;
-  const games = new Map(db.games.map((g) => [g.id, g]));
-  for (const m of ko.matches) {
-    const round = t.rounds.find((r) => r.number === m.round);
-    if (!round) continue;
-    if (!m.a || !m.b) {
-      m.winnerId = m.a ?? m.b;
-      continue;
-    }
-    const base = ko.gamesPerMatch;
-    const baseUnplayed = m.gameIds.slice(0, base).some((id) => !games.get(id)?.result);
-    // Drop unplayed extra games that are no longer justified.
-    const keep: string[] = [];
-    let removed = false;
-    m.gameIds.forEach((id, i) => {
-      const g = games.get(id);
-      if (!g) return;
-      const isExtra = i >= base;
-      const lastUnplayedExtra = isExtra && !g.result && i === m.gameIds.length - 1;
-      if (isExtra && !g.result && (baseUnplayed || !lastUnplayedExtra)) {
-        db.games = db.games.filter((x) => x.id !== id);
-        round.pairings = round.pairings.filter((p) => p.gameId !== id);
-        removed = true;
-        return;
-      }
-      keep.push(id);
-    });
-    if (removed) m.gameIds = keep;
-
-    const st = matchState(db, m);
-    if (st.pending > 0) {
-      m.winnerId = null;
-      continue;
-    }
-    if (st.scoreA === st.scoreB) {
-      m.winnerId = null;
-      addMatchGame(db, t, m, round); // tiebreak, colors swapped
-    } else {
-      m.winnerId = st.scoreA > st.scoreB ? m.a : m.b;
-    }
-  }
-}
-
-function generateKnockoutRound(db: Database, t: Tournament) {
-  const ko = t.knockout!;
-  const total = knockoutRounds(t);
-  const roundNumber = t.rounds.length + 1;
-  if (roundNumber > total) throw new UserError("The bracket is complete.");
-  const withdrawn = new Set(t.withdrawnIds);
-  const round = { number: roundNumber, pairings: [], byePlayerId: null, createdAt: new Date().toISOString() };
-  const newMatches: KnockoutMatch[] = [];
-
-  if (roundNumber === 1) {
-    if (t.participantIds.length < 2) throw new UserError("At least two participants are needed.");
-    const players = playerMapRatings(db);
-    const seeds = activeParticipants(t).sort((x, y) => (players.get(y) ?? 0) - (players.get(x) ?? 0));
-    ko.bracketSize = nextPowerOfTwo(seeds.length);
-    ko.matches = [];
-    const order = bracketSeedOrder(ko.bracketSize);
-    for (let i = 0; i < order.length; i += 2) {
-      const sa = order[i];
-      const sb = order[i + 1];
-      const a = seeds[sa - 1] ?? null;
-      const b = seeds[sb - 1] ?? null;
-      newMatches.push({ id: newId(), round: 1, slot: i / 2 + 1, a, b, seedA: a ? sa : null, seedB: b ? sb : null, gameIds: [], winnerId: a && b ? null : (a ?? b), thirdPlace: false });
-    }
-  } else {
-    const prev = ko.matches.filter((m) => m.round === roundNumber - 1 && !m.thirdPlace).sort((x, y) => x.slot - y.slot);
-    // Withdrawn players hand the match to their opponent.
-    for (const m of prev) {
-      if (m.winnerId) continue;
-      const aOut = !!m.a && withdrawn.has(m.a);
-      const bOut = !!m.b && withdrawn.has(m.b);
-      if (aOut !== bOut) m.winnerId = aOut ? m.b : m.a;
-    }
-    if (prev.some((m) => !m.winnerId)) throw new UserError("Every match of the current round needs a winner first (ties get an automatic tiebreak game).");
-    const seedOf = (id: string | null) => {
-      const m = ko.matches.find((x) => x.round === 1 && (x.a === id || x.b === id));
-      return m ? (m.a === id ? m.seedA : m.seedB) : null;
-    };
-    for (let i = 0; i < prev.length; i += 2) {
-      const a = prev[i].winnerId;
-      const b = prev[i + 1]?.winnerId ?? null;
-      newMatches.push({ id: newId(), round: roundNumber, slot: i / 2 + 1, a, b, seedA: seedOf(a), seedB: seedOf(b), gameIds: [], winnerId: a && b ? null : (a ?? b), thirdPlace: false });
-    }
-    if (roundNumber === total && ko.thirdPlace && prev.length === 2) {
-      const la = prev[0].winnerId === prev[0].a ? prev[0].b : prev[0].a;
-      const lb = prev[1].winnerId === prev[1].a ? prev[1].b : prev[1].a;
-      if (la && lb) newMatches.push({ id: newId(), round: roundNumber, slot: 2, a: la, b: lb, seedA: seedOf(la), seedB: seedOf(lb), gameIds: [], winnerId: null, thirdPlace: true });
-    }
-  }
-
-  ko.matches.push(...newMatches);
-  t.rounds.push(round);
-  for (const m of newMatches) {
-    if (!m.a || !m.b) continue;
-    for (let i = 0; i < ko.gamesPerMatch; i++) addMatchGame(db, t, m, round);
-  }
-}
-
-function playerMapRatings(db: Database): Map<string, number> {
-  return new Map(db.players.map((p) => [p.id, p.rating]));
-}

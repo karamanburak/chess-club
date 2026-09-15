@@ -2,16 +2,18 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useT } from "./I18nProvider";
 
 /** Debounced search input bound to the `q` query parameter. */
-export function SearchBox({ placeholder = "Search…" }: { placeholder?: string }) {
+export function SearchBox({ placeholder }: { placeholder?: string }) {
+  const { t } = useT();
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
   const [value, setValue] = useState(params.get("q") ?? "");
 
   useEffect(() => {
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       const next = new URLSearchParams(params.toString());
       if (value) next.set("q", value);
       else next.delete("q");
@@ -19,7 +21,7 @@ export function SearchBox({ placeholder = "Search…" }: { placeholder?: string 
       const qs = next.toString();
       if (qs !== params.toString()) router.replace(qs ? `${path}?${qs}` : path);
     }, 250);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [value, params, path, router]);
 
   return (
@@ -27,9 +29,9 @@ export function SearchBox({ placeholder = "Search…" }: { placeholder?: string 
       type="search"
       value={value}
       onChange={(e) => setValue(e.target.value)}
-      placeholder={placeholder}
+      placeholder={placeholder ?? t.players.search.placeholder}
       className="w-full sm:w-64"
-      aria-label="Search"
+      aria-label={t.players.search.label}
     />
   );
 }

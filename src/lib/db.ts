@@ -19,7 +19,7 @@ const KEEP_BACKUPS = 30;
 
 export const DEFAULT_TIEBREAKS: TiebreakKey[] = ["buchholz", "sonneborn", "direct", "wins"];
 
-export const DEFAULT_CLUB: ClubInfo = { name: "Chess Club", motto: "", founded: "", meets: "", nextNight: "", announcement: "" };
+export const DEFAULT_CLUB: ClubInfo = { name: "Chess Club", meets: "", nextNight: "", announcement: "" };
 
 function emptyDb(): Database {
   return {
@@ -41,6 +41,9 @@ export function migrate(raw: any): Database {
   const db: any = { ...emptyDb(), ...raw };
   db.settings = { ...emptyDb().settings, ...(raw?.settings ?? {}) };
   db.settings.club = { ...DEFAULT_CLUB, ...(raw?.settings?.club ?? {}) };
+  if (db.settings.language !== "de") db.settings.language = "en";
+  delete db.settings.club.motto; // replaced by the quote of the day
+  delete db.settings.club.founded; // removed field
   db.version = 2;
 
   for (const g of db.games) {

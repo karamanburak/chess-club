@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useT } from "./I18nProvider";
 
 interface Toast {
   id: number;
@@ -46,6 +47,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
+  const { t } = useT();
   const [busy, setBusy] = useState(false);
   const run = async () => {
     if (!toast.undo || busy) return;
@@ -72,11 +74,11 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
       <span>{toast.text}</span>
       {toast.undo && (
         <button type="button" onClick={run} disabled={busy} className="btn btn-sm btn-primary">
-          {busy ? "…" : "Undo"}
+          {busy ? "…" : t.pairing.undo}
           <span className="kbd ml-1 border-accent-fg/30 text-accent-fg bg-transparent">⌘Z</span>
         </button>
       )}
-      <button type="button" onClick={onClose} className="text-muted hover:text-fg text-base leading-none" aria-label="Dismiss">
+      <button type="button" onClick={onClose} className="text-muted hover:text-fg text-base leading-none" aria-label={t.pairing.dismiss}>
         ×
       </button>
     </div>

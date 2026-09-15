@@ -124,9 +124,6 @@ export interface ClubSession {
 /** Who we are: shown in the header, on the home page and on the TV screen. */
 export interface ClubInfo {
   name: string;
-  motto: string;
-  /** Free text, e.g. "2024". */
-  founded: string;
   /** Free text, e.g. "Thursdays 18:00, Room 3.14". */
   meets: string;
   /** ISO date of the next club night, or "". */
@@ -149,6 +146,8 @@ export interface Settings {
   byePoints: number;
   defaultTiebreaks: TiebreakKey[];
   club: ClubInfo;
+  /** Club default UI language; a device can override it with the cc_lang cookie. */
+  language?: "en" | "de";
   adminPasswordHash?: string;
   /** Club-wide member code (scrypt hash). Unset = no code asked, open club. */
   memberCodeHash?: string;

@@ -1,12 +1,15 @@
 "use client";
 
+import { useT } from "@/components/I18nProvider";
+
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const { t } = useT();
   return (
     <div className="card max-w-xl mx-auto mt-10 border-loss/40">
-      <h2 className="text-lg font-semibold mb-2">Something went wrong</h2>
+      <h2 className="text-lg font-semibold mb-2">{t.errors.somethingWrong}</h2>
       <p className="text-sm text-muted mb-4">{error.message}</p>
       <button className="btn" onClick={() => reset()}>
-        Try again
+        {t.errors.tryAgain}
       </button>
     </div>
   );

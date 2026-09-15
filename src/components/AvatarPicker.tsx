@@ -6,7 +6,9 @@ import { createPortal } from "react-dom";
 import { setAvatar } from "@/lib/actions";
 import { FaceSvg } from "./Face";
 import { Icon } from "./icons";
+import { useT } from "./I18nProvider";
 import { useToast } from "./Toast";
+import { fmt } from "@/lib/i18n";
 
 /**
  * The big profile picture. For the admin it is a button: clicking opens a
@@ -25,6 +27,7 @@ export function AvatarPicker({
   choices: string[];
   canEdit: boolean;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState(seed);
   const [pending, start] = useTransition();
@@ -52,7 +55,7 @@ export function AvatarPicker({
         toast.push({ text: res.error, tone: "error" });
         return;
       }
-      toast.push({ text: `New face for ${name}`, tone: "ok" });
+      toast.push({ text: fmt(t.players.avatar.newFace, { name }), tone: "ok" });
       setOpen(false);
       router.refresh();
     });
@@ -74,7 +77,7 @@ export function AvatarPicker({
         type="button"
         onClick={() => setOpen(true)}
         className="relative group rounded-full shrink-0"
-        title="Change avatar"
+        title={t.players.avatar.change}
         aria-haspopup="dialog"
       >
         {picture}
@@ -92,7 +95,7 @@ export function AvatarPicker({
             onClick={() => setOpen(false)}
             role="dialog"
             aria-modal="true"
-            aria-label="Choose an avatar"
+            aria-label={t.players.avatar.dialogLabel}
           >
             <div
               className="card max-w-2xl w-full max-h-[85vh] flex flex-col gap-4 shadow-2xl"
@@ -105,17 +108,14 @@ export function AvatarPicker({
                   className="h-16 w-16 rounded-full ring-1 ring-line/70 shrink-0"
                 />
                 <div className="min-w-0 flex-1">
-                  <h2 className="card-title">Pick a face for {name}</h2>
-                  <p className="text-sm text-muted">
-                    Click one to save it. The same pick looks the same on every
-                    screen.
-                  </p>
+                  <h2 className="card-title">{fmt(t.players.avatar.pickFor, { name })}</h2>
+                  <p className="text-sm text-muted">{t.players.avatar.clickToSave}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
                   className="text-muted hover:text-fg text-2xl leading-none"
-                  aria-label="Close"
+                  aria-label={t.common.close}
                 >
                   ×
                 </button>
@@ -128,7 +128,7 @@ export function AvatarPicker({
                     disabled={pending}
                     onClick={() => choose(s)}
                     className={`rounded-2xl p-1.5 border transition hover:border-accent/70 hover:bg-accent/10 disabled:opacity-60 ${s === current ? "border-accent bg-accent/10" : "border-line"}`}
-                    title={s === seed ? "Current face" : "Use this face"}
+                    title={s === seed ? t.players.avatar.currentFace : t.players.avatar.useFace}
                   >
                     <FaceSvg seed={s} className="h-full w-full rounded-full" />
                   </button>
@@ -136,7 +136,7 @@ export function AvatarPicker({
               </div>
               <div className="flex items-center justify-end gap-3 pt-1">
                 <span className="text-xs text-muted">
-                  {pending ? "Saving…" : "Esc to close"}
+                  {pending ? t.common.saving : t.players.avatar.escToClose}
                 </span>
               </div>
             </div>

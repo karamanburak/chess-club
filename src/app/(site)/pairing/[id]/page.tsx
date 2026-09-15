@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { readDb } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
 import { sessionDelete } from "@/lib/actions";
 import { formatDateTime, playerMap, sessionSummary } from "@/lib/queries";
 import { ConfirmButton } from "@/components/ConfirmButton";
@@ -12,6 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SessionPage({ params }: PageProps<"/pairing/[id]">) {
   const { id } = await params;
+  const { t, lang } = await getT();
   const db = await readDb();
   const admin = await isAdmin();
   const s = db.sessions.find((x) => x.id === id);
@@ -25,20 +28,20 @@ export default async function SessionPage({ params }: PageProps<"/pairing/[id]">
       <PageHeader
         eyebrow={
           <Link href="/pairing" className="hover:text-fg">
-            ← Club nights
+            ← {t.pairing.clubNights}
           </Link>
         }
-        title={`Club night · ${formatDateTime(s.createdAt)}`}
+        title={`${t.common.clubNight} · ${formatDateTime(s.createdAt, lang)}`}
         subtitle={
           <span>
-            {s.presentIds.length} players · {s.rounds.length} rounds · {s.rated ? "rated" : "unrated"}
-            {s.closedAt && ` · closed ${formatDateTime(s.closedAt)}`}
+            {plural(s.presentIds.length, t.common.playersN)} · {plural(s.rounds.length, t.common.roundsN)} · {s.rated ? t.common.rated : t.common.unrated}
+            {s.closedAt && ` · ${fmt(t.pairing.closedAt, { time: formatDateTime(s.closedAt, lang) })}`}
           </span>
         }
         actions={
           admin ? (
-            <ConfirmButton action={sessionDelete.bind(null, s.id)} confirmLabel="Delete night and games">
-              Delete
+            <ConfirmButton action={sessionDelete.bind(null, s.id)} confirmLabel={t.pairing.deleteNightConfirm}>
+              {t.common.delete}
             </ConfirmButton>
           ) : undefined
         }
@@ -46,20 +49,20 @@ export default async function SessionPage({ params }: PageProps<"/pairing/[id]">
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <div className="flex flex-col gap-3">
           {s.rounds.map((r) => (
-            <Section key={r.number} title={`Round ${r.number}`} flush>
+            <Section key={r.number} title={fmt(t.common.roundN, { n: r.number })} flush>
               <RoundList r={r} games={games} names={names} />
             </Section>
           ))}
         </div>
-        <Section title="Results of the night" flush>
+        <Section title={t.pairing.nightResults} flush>
           <table className="table">
             <thead>
               <tr>
                 <th className="w-10 text-center">#</th>
-                <th>Player</th>
-                <th className="text-right">Pts</th>
-                <th className="text-right">W/D/L</th>
-                <th className="text-right">Elo Δ</th>
+                <th>{t.common.player}</th>
+                <th className="text-right">{t.common.points}</th>
+                <th className="text-right">{t.pairing.wdlShort}</th>
+                <th className="text-right">{t.pairing.eloDelta}</th>
               </tr>
             </thead>
             <tbody>

@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
 import { achievements, currentSeason, monthChampions, seasonTable, titleFor, TITLES, tournamentWinners } from "@/lib/club";
 import { clubStats, formatDate, formatMonth, leaderboard, playerMap, resultLabel } from "@/lib/queries";
 import { Avatar, Empty, PageHeader, PlayerLink, Rank, Section, TitleBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-const MODE_LABEL: Record<string, string> = { random: "Random", swiss: "Swiss", roundrobin: "Round robin", knockout: "Knockout" };
-
 export default async function HallOfFamePage() {
+  const { t, lang } = await getT();
   const db = await readDb();
   const admin = await isAdmin();
   const club = db.settings.club;
@@ -28,42 +29,42 @@ export default async function HallOfFamePage() {
     .slice(0, 6);
   const holders = [...TITLES]
     .reverse()
-    .map((t) => ({ t, players: leaderboard(db).filter((p) => titleFor(p)?.key === t.key) }))
+    .map((title) => ({ title, players: leaderboard(db).filter((p) => titleFor(p)?.key === title.key) }))
     .filter((x) => x.players.length);
 
   return (
     <>
       <PageHeader
-        eyebrow={club.founded ? `${club.name} · est. ${club.founded}` : club.name}
-        title="Hall of Fame"
-        subtitle={<span>Champions, titles and records. Everything here is earned over the board.</span>}
-        actions={admin ? <Link href="/admin#seasons" className="btn">Manage seasons</Link> : undefined}
+        eyebrow={club.name}
+        title={t.hall.title}
+        subtitle={<span>{t.hall.subtitle}</span>}
+        actions={admin ? <Link href="/admin#seasons" className="btn">{t.hall.manageSeasons}</Link> : undefined}
       />
 
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <div className="col-stack">
           <Section
-            title={season ? `${season.name} · running` : "No season running"}
+            title={season ? fmt(t.hall.seasonRunning, { season: season.name }) : t.hall.noSeasonRunning}
             flush
-            right={season ? <span className="text-xs text-muted">since {formatDate(season.start)}</span> : undefined}
+            right={season ? <span className="text-xs text-muted">{fmt(t.hall.since, { date: formatDate(season.start, lang) })}</span> : undefined}
           >
             {!season ? (
-              <Empty icon="🏁" title="Between seasons">{admin ? <Link href="/admin#seasons" className="text-accent hover:underline">Start the next season</Link> : "The admin can start the next season."}</Empty>
+              <Empty icon="flag" title={t.hall.betweenSeasons}>{admin ? <Link href="/admin#seasons" className="text-accent hover:underline">{t.hall.startNextSeason}</Link> : t.hall.adminCanStart}</Empty>
             ) : table.length === 0 ? (
-              <Empty icon="♟" title="No games this season yet">The season table fills up as games are played.</Empty>
+              <Empty icon="pawn" title={t.hall.noGamesThisSeason}>{t.hall.seasonTableFills}</Empty>
             ) : (
               <div className="scroll-x">
                 <table className="table">
                   <thead>
                     <tr>
                       <th className="w-12 text-center">#</th>
-                      <th>Player</th>
-                      <th className="text-right">Pts</th>
-                      <th className="text-right hidden sm:table-cell">Games</th>
-                      <th className="text-right hidden md:table-cell">W / D / L</th>
-                      <th className="text-right hidden sm:table-cell">Elo ±</th>
-                      <th className="text-right hidden md:table-cell">Nights</th>
-                      <th className="text-right hidden md:table-cell">Titles</th>
+                      <th>{t.common.player}</th>
+                      <th className="text-right">{t.common.points}</th>
+                      <th className="text-right hidden sm:table-cell">{t.common.games}</th>
+                      <th className="text-right hidden md:table-cell">{t.common.wdl}</th>
+                      <th className="text-right hidden sm:table-cell">{t.hall.eloPlusMinus}</th>
+                      <th className="text-right hidden md:table-cell">{t.hall.nights}</th>
+                      <th className="text-right hidden md:table-cell">{t.hall.titles}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -94,9 +95,9 @@ export default async function HallOfFamePage() {
             )}
           </Section>
 
-          <Section title="Season champions" flush>
+          <Section title={t.hall.seasonChampions} flush>
             {past.length === 0 ? (
-              <Empty icon="👑" title="No season closed yet">The first champion is crowned when the admin closes a season.</Empty>
+              <Empty icon="crown" title={t.hall.noSeasonClosed}>{t.hall.firstChampion}</Empty>
             ) : (
               <ul className="divide-y divide-line">
                 {past.map((s) => (
@@ -107,7 +108,7 @@ export default async function HallOfFamePage() {
                     <span className="flex-1 min-w-0">
                       <span className="block font-medium">{s.name}</span>
                       <span className="block text-xs text-muted">
-                        {formatDate(s.start)} – {s.end ? formatDate(s.end) : ""}
+                        {formatDate(s.start, lang)} – {s.end ? formatDate(s.end, lang) : ""}
                       </span>
                     </span>
                     {s.championId ? (
@@ -116,7 +117,7 @@ export default async function HallOfFamePage() {
                         <PlayerLink id={s.championId} name={name(s.championId)} className="font-semibold" />
                       </span>
                     ) : (
-                      <span className="text-sm text-muted">no games</span>
+                      <span className="text-sm text-muted">{t.hall.noGames}</span>
                     )}
                   </li>
                 ))}
@@ -124,9 +125,9 @@ export default async function HallOfFamePage() {
             )}
           </Section>
 
-          <Section title="Tournament winners" flush>
+          <Section title={t.hall.tournamentWinners} flush>
             {winners.length === 0 ? (
-              <Empty icon="🏆" title="No finished tournament yet" />
+              <Empty icon="trophy" title={t.hall.noFinishedTournament} />
             ) : (
               <ul className="divide-y divide-line">
                 {winners.map((w) => (
@@ -139,8 +140,8 @@ export default async function HallOfFamePage() {
                         {w.tournament.name}
                       </Link>
                       <span className="block text-xs text-muted">
-                        {formatDate(w.tournament.date)} · {MODE_LABEL[w.tournament.pairingMode]} · {w.tournament.participantIds.length} players
-                        {w.runnerUpId ? ` · runner-up ${name(w.runnerUpId)}` : ""}
+                        {formatDate(w.tournament.date, lang)} · {t.hall.modes[w.tournament.pairingMode as keyof typeof t.hall.modes] ?? w.tournament.pairingMode} · {plural(w.tournament.participantIds.length, t.common.playersN)}
+                        {w.runnerUpId ? ` · ${fmt(t.hall.runnerUp, { name: name(w.runnerUpId) })}` : ""}
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
@@ -155,15 +156,15 @@ export default async function HallOfFamePage() {
         </div>
 
         <div className="col-stack">
-          <Section title="Title holders">
+          <Section title={t.hall.titleHolders}>
             {holders.length === 0 ? (
-              <p className="text-sm text-muted">Titles are held from 10 games on and follow the rating: Club Player 1100, Expert 1300, Master 1500, Grandmaster 1700.</p>
+              <p className="text-sm text-muted">{t.hall.titlesHint}</p>
             ) : (
               <div className="flex flex-col gap-3">
-                {holders.map(({ t, players }) => (
-                  <div key={t.key}>
+                {holders.map(({ title, players }) => (
+                  <div key={title.key}>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <TitleBadge title={t} />
+                      <TitleBadge title={title} />
                       <span className="text-xs text-muted">{players.length}</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -177,15 +178,15 @@ export default async function HallOfFamePage() {
             )}
           </Section>
 
-          <Section title="Most decorated">
+          <Section title={t.hall.mostDecorated}>
             {decorated.length === 0 ? (
-              <p className="text-sm text-muted">Achievements appear on player profiles as they are earned.</p>
+              <p className="text-sm text-muted">{t.hall.achievementsHint}</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {decorated.map(({ p, earned }) => (
                   <li key={p.id} className="flex items-center gap-3">
                     <PlayerLink id={p.id} name={p.name} avatar className="flex-1 font-medium" />
-                    <span className="text-base tracking-wide" title={earned.map((a) => a.label).join(", ")}>
+                    <span className="text-base tracking-wide" title={earned.map((a) => t.club.achievements[a.key as keyof typeof t.club.achievements]?.label ?? a.label).join(", ")}>
                       {earned.slice(0, 6).map((a) => a.icon).join(" ")}
                       {earned.length > 6 && <span className="text-xs text-muted ml-1">+{earned.length - 6}</span>}
                     </span>
@@ -195,14 +196,14 @@ export default async function HallOfFamePage() {
             )}
           </Section>
 
-          <Section title="Player of the month" flush>
+          <Section title={t.hall.playerOfTheMonth} flush>
             {months.length === 0 ? (
-              <Empty icon="📅" title="Not enough games yet">Three games in a month are needed.</Empty>
+              <Empty icon="pin" title={t.hall.notEnoughGames}>{t.hall.threeGamesNeeded}</Empty>
             ) : (
               <ul className="divide-y divide-line">
                 {months.map((m) => (
                   <li key={m.month} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                    <span className="w-24 text-muted text-xs">{formatMonth(m.month)}</span>
+                    <span className="w-24 text-muted text-xs">{formatMonth(m.month, lang)}</span>
                     <PlayerLink id={m.playerId} name={name(m.playerId)} avatar className="flex-1 font-medium" />
                     <span className="font-mono text-xs text-muted">
                       {m.points}/{m.games}
@@ -213,10 +214,10 @@ export default async function HallOfFamePage() {
             )}
           </Section>
 
-          <Section title="Club records">
+          <Section title={t.hall.clubRecords}>
             <ul className="flex flex-col gap-2.5 text-sm">
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Highest rating ever</span>
+                <span className="text-muted">{t.hall.highestRating}</span>
                 {st.highestRating ? (
                   <span className="flex items-center gap-2">
                     <PlayerLink id={st.highestRating.playerId} name={name(st.highestRating.playerId)} />
@@ -227,7 +228,7 @@ export default async function HallOfFamePage() {
                 )}
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Longest win streak</span>
+                <span className="text-muted">{t.hall.longestWinStreak}</span>
                 {st.longestWinStreak ? (
                   <span className="flex items-center gap-2">
                     <PlayerLink id={st.longestWinStreak.playerId} name={name(st.longestWinStreak.playerId)} />
@@ -238,20 +239,20 @@ export default async function HallOfFamePage() {
                 )}
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Biggest upset</span>
+                <span className="text-muted">{t.hall.biggestUpset}</span>
                 {st.biggestUpset ? (
                   <span className="text-right">
                     <span className="block">
                       {name(st.biggestUpset.game.whiteId)} {resultLabel(st.biggestUpset.game.result)} {name(st.biggestUpset.game.blackId)}
                     </span>
-                    <span className="block text-xs text-muted">{st.biggestUpset.diff} rating points apart</span>
+                    <span className="block text-xs text-muted">{fmt(t.hall.pointsApart, { n: st.biggestUpset.diff })}</span>
                   </span>
                 ) : (
                   <span className="text-muted">–</span>
                 )}
               </li>
               <li className="flex items-center justify-between gap-3">
-                <span className="text-muted">Most games</span>
+                <span className="text-muted">{t.hall.mostGames}</span>
                 {st.mostActive ? (
                   <span className="flex items-center gap-2">
                     <PlayerLink id={st.mostActive.playerId} name={name(st.mostActive.playerId)} />

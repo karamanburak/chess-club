@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
 import { addPlayer, recordFriendlyGame, registerSelf } from "@/lib/actions";
 import { FaceSvg } from "@/components/Face";
 import { leaderboard, recentForm } from "@/lib/queries";
@@ -14,6 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function PlayersPage({ searchParams }: PageProps<"/players">) {
   const sp = await searchParams;
   const q = (typeof sp.q === "string" ? sp.q : "").toLowerCase();
+  const { t } = await getT();
   const db = await readDb();
   const admin = await isAdmin();
   const meId = await currentPlayerId();
@@ -27,36 +30,36 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
   return (
     <>
       <PageHeader
-        eyebrow="Members"
-        title="Players"
+        eyebrow={t.players.list.eyebrow}
+        title={t.players.list.title}
         subtitle={
           <>
-            <span>{active.length} active</span>
-            {all.length - active.length > 0 && <span>· {all.length - active.length} inactive</span>}
+            <span>{fmt(t.players.list.nActive, { n: active.length })}</span>
+            {all.length - active.length > 0 && <span>{fmt(t.players.list.nInactive, { n: all.length - active.length })}</span>}
           </>
         }
         actions={
           <Suspense>
-            <SearchBox placeholder="Search players…" />
+            <SearchBox placeholder={t.players.list.searchPlaceholder} />
           </Suspense>
         }
       />
 
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-        <Section title="All players" flush right={q ? <span className="text-xs text-muted">{players.length} match</span> : undefined}>
+        <Section title={t.players.list.allPlayers} flush right={q ? <span className="text-xs text-muted">{plural(players.length, t.players.list.nMatch)}</span> : undefined}>
           {players.length === 0 ? (
-            <Empty icon="♞" title={q ? "No match" : "No players yet"}>{q ? "Try another name." : "Use the form to add your first club member."}</Empty>
+            <Empty icon="pawn" title={q ? t.players.list.noMatch : t.players.list.noPlayers}>{q ? t.players.list.tryAnother : t.players.list.useForm}</Empty>
           ) : (
             <div className="scroll-x">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th className="text-right">Elo</th>
-                    <th className="text-right hidden sm:table-cell">Start</th>
-                    <th className="hidden md:table-cell">Form</th>
-                    <th className="text-right">Games</th>
-                    <th className="text-right hidden sm:table-cell">W / D / L</th>
+                    <th>{t.players.list.name}</th>
+                    <th className="text-right">{t.common.elo}</th>
+                    <th className="text-right hidden sm:table-cell">{t.players.list.start}</th>
+                    <th className="hidden md:table-cell">{t.common.form}</th>
+                    <th className="text-right">{t.common.games}</th>
+                    <th className="text-right hidden sm:table-cell">{t.common.wdl}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -67,7 +70,7 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                         <span className="flex items-center gap-2">
                           <PlayerLink id={p.id} name={p.name} avatar />
                           <Provisional games={p.gamesPlayed} />
-                          {!p.active && <span className="badge border-muted/40 text-muted">inactive</span>}
+                          {!p.active && <span className="badge border-muted/40 text-muted">{t.players.list.inactive}</span>}
                         </span>
                       </td>
                       <td className="text-right font-mono text-accent">{p.rating}</td>
@@ -81,7 +84,7 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                       </td>
                       <td className="text-right">
                         <Link href={`/players/${p.id}`} className="btn btn-sm btn-ghost">
-                          {admin ? "Edit" : "View"} →
+                          {admin ? t.players.list.edit : t.players.list.view}
                         </Link>
                       </td>
                     </tr>
@@ -94,82 +97,82 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
 
         <div className="col-stack">
           {admin ? (
-            <Section title="Add player">
+            <Section title={t.players.list.addPlayer}>
               <form action={addPlayer} className="flex flex-col gap-3">
                 <div>
                   <label className="label" htmlFor="name">
-                    Name
+                    {t.players.list.name}
                   </label>
-                  <input id="name" name="name" required className="w-full" placeholder="e.g. Anna" autoComplete="off" />
+                  <input id="name" name="name" required className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
                 </div>
                 <div>
                   <label className="label" htmlFor="rating">
-                    Starting Elo
+                    {t.players.list.startingElo}
                   </label>
                   <input id="rating" name="rating" type="number" defaultValue={db.settings.startRating} min={100} max={3000} className="w-full" />
-                  <p className="text-xs text-muted mt-1.5">Unknown strength? Keep the default. New players adjust quickly (K = 40 for the first 30 games).</p>
+                  <p className="text-xs text-muted mt-1.5">{t.players.list.startingEloHint}</p>
                 </div>
-                <SubmitButton pendingText="Adding…">Add player</SubmitButton>
+                <SubmitButton pendingText={t.players.list.adding}>{t.players.list.addPlayer}</SubmitButton>
               </form>
             </Section>
           ) : me ? (
-            <Section title="You">
+            <Section title={t.players.list.you}>
               <div className="flex items-center gap-3">
                 <FaceSvg seed={me.avatar} title={me.name} className="h-12 w-12 rounded-full ring-1 ring-line/70" />
                 <div className="min-w-0 flex-1">
                   <div className="font-medium truncate">{me.name}</div>
-                  <div className="text-xs text-muted">This device knows you. New members join from their own device.</div>
+                  <div className="text-xs text-muted">{t.players.list.deviceKnowsYou}</div>
                 </div>
                 <Link href={`/players/${me.id}`} className="btn btn-sm">
-                  Profile →
+                  {t.players.list.profile}
                 </Link>
               </div>
             </Section>
           ) : (
-            <Section title="Join the club">
+            <Section title={t.players.list.joinClub}>
               <form action={registerSelf} className="flex flex-col gap-3">
                 <p className="text-xs text-muted -mt-1">
-                  New here? Add yourself once. Already on the list?{" "}
+                  {t.players.list.newHere}{" "}
                   <Link href="/me" className="text-accent hover:underline">
-                    Pick your face
+                    {t.players.list.pickYourFace}
                   </Link>{" "}
-                  instead.
+                  {t.players.list.instead}
                 </p>
                 <div>
                   <label className="label" htmlFor="name">
-                    Your name
+                    {t.players.list.yourName}
                   </label>
-                  <input id="name" name="name" required minLength={2} className="w-full" placeholder="e.g. Anna" autoComplete="off" />
+                  <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="label" htmlFor="pin">
-                      4-digit PIN
+                      {t.players.list.pin4}
                     </label>
                     <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                   </div>
                   <div>
                     <label className="label" htmlFor="confirm">
-                      Repeat
+                      {t.players.list.repeat}
                     </label>
                     <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                   </div>
                 </div>
-                <p className="text-xs text-muted">You start at {db.settings.startRating} Elo like everyone. The PIN lets you claim your profile on another device; only you and the admin can change it.</p>
-                <SubmitButton pendingText="Joining…">Join the club</SubmitButton>
+                <p className="text-xs text-muted">{fmt(t.players.list.startHint, { rating: db.settings.startRating })}</p>
+                <SubmitButton pendingText={t.players.list.joining}>{t.players.list.joinClub}</SubmitButton>
               </form>
             </Section>
           )}
 
-          <Section title="Record a friendly game">
-            <p className="text-xs text-muted -mt-2 mb-3">A single game outside a tournament or club night. Counts for Elo unless unrated.</p>
+          <Section title={t.players.list.friendly.title}>
+            <p className="text-xs text-muted -mt-2 mb-3">{t.players.list.friendly.hint}</p>
             {active.length < 2 ? (
-              <p className="text-sm text-muted">Add at least two players first.</p>
+              <p className="text-sm text-muted">{t.players.list.friendly.needTwo}</p>
             ) : (
               <form action={recordFriendlyGame} className="flex flex-col gap-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="label">⚪ White</label>
+                    <label className="label">⚪ {t.common.white}</label>
                     <select name="whiteId" required className="w-full">
                       {active.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -179,7 +182,7 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                     </select>
                   </div>
                   <div>
-                    <label className="label">⚫ Black</label>
+                    <label className="label">⚫ {t.common.black}</label>
                     <select name="blackId" required className="w-full" defaultValue={active[1]?.id}>
                       {active.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -190,12 +193,12 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                   </div>
                 </div>
                 <div>
-                  <label className="label">Result</label>
+                  <label className="label">{t.common.result}</label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      ["1-0", "1–0", "White wins"],
-                      ["1/2-1/2", "½–½", "Draw"],
-                      ["0-1", "0–1", "Black wins"],
+                      ["1-0", "1–0", t.players.list.friendly.whiteWins],
+                      ["1/2-1/2", "½–½", t.players.list.friendly.draw],
+                      ["0-1", "0–1", t.players.list.friendly.blackWins],
                     ].map(([v, l, d], i) => (
                       <label key={v} className="chip flex-col items-center gap-0.5 py-2">
                         <input type="radio" name="result" value={v} defaultChecked={i === 0} className="sr-only" />
@@ -208,17 +211,17 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                 <div className="grid grid-cols-2 gap-3 items-end">
                   <div>
                     <label className="label" htmlFor="friendly-date">
-                      Played on
+                      {t.players.list.friendly.playedOn}
                     </label>
                     <input id="friendly-date" name="date" type="date" defaultValue={today} max={today} className="w-full" />
                   </div>
                   <label className="flex items-center gap-2 text-sm pb-2">
-                    <input type="checkbox" name="rated" value="on" defaultChecked /> Rated
+                    <input type="checkbox" name="rated" value="on" defaultChecked /> {t.players.list.friendly.rated}
                   </label>
                 </div>
                 <input type="hidden" name="rated" value="off" />
-                <p className="text-xs text-muted -mt-1">Backdated games slot into the Elo history at that date, so ratings are replayed in the right order.</p>
-                <SubmitButton pendingText="Saving…">Save game</SubmitButton>
+                <p className="text-xs text-muted -mt-1">{t.players.list.friendly.backdated}</p>
+                <SubmitButton pendingText={t.common.saving}>{t.players.list.friendly.save}</SubmitButton>
               </form>
             )}
           </Section>

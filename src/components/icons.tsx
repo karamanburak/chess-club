@@ -14,12 +14,25 @@ export function KnightMark({ className = "", ...rest }: SVGProps<SVGSVGElement>)
   );
 }
 
-type Name = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh";
+export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv";
 
 /** Small line icons, all on the same 24px grid and stroke, so the header reads as one family. */
-export function Icon({ name, className = "h-4 w-4", ...rest }: { name: Name } & SVGProps<SVGSVGElement>) {
+export function Icon({ name, className = "h-4 w-4", ...rest }: { name: IconName } & SVGProps<SVGSVGElement>) {
   const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, className, "aria-hidden": true, ...rest };
   switch (name) {
+    case "tv":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="12" rx="2" />
+          <path d="M8 21h8M12 17v4" />
+        </svg>
+      );
+    case "chevron":
+      return (
+        <svg {...common}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      );
     case "crown":
       return (
         <svg {...common}>

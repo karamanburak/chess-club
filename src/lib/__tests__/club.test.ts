@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { recomputeRatings } from "../elo";
-import { achievements, currentSeason, daysUntil, highlights, monthChampions, nextTitle, seasonTable, titleFor, TITLE_GAMES, tournamentWinners } from "../club";
+import { achievements, currentSeason, daysUntil, highlights, monthChampions, nextTitle, seasonOverdue, seasonTable, titleFor, TITLE_GAMES, tournamentWinners } from "../club";
 import { db, game, player, tournament } from "./fixtures";
 import type { Season } from "../types";
 
@@ -136,5 +136,23 @@ describe("month champions and highlights", () => {
     tomorrow.setDate(today.getDate() + 1);
     expect(daysUntil(iso(tomorrow))).toBe(1);
     expect(daysUntil("")).toBeNull();
+  });
+});
+
+describe("seasonOverdue", () => {
+  const season = (start: string, end: string | null = null) => ({ id: "s", name: "S", start, end, championId: null });
+  test("a season within its own year is fine", () => {
+    expect(seasonOverdue(season("2026-01-10"), "2026-11-30")).toBeNull();
+  });
+  test("a season that spilled well into the next year is overdue", () => {
+    expect(seasonOverdue(season("2025-03-01"), "2026-03-15")).toBe(12);
+    expect(seasonOverdue(season("2025-01-01"), "2026-02-20")).toBe(13);
+  });
+  test("a December start may run into January without nagging", () => {
+    expect(seasonOverdue(season("2025-12-15"), "2026-01-20")).toBeNull();
+    expect(seasonOverdue(season("2025-12-15"), "2026-03-01")).toBe(3);
+  });
+  test("closed seasons are never overdue", () => {
+    expect(seasonOverdue(season("2020-01-01", "2020-12-31"), "2026-01-01")).toBeNull();
   });
 });

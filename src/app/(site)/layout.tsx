@@ -1,11 +1,13 @@
 import { Nav } from "@/components/Nav";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { readDb, STORAGE_KIND } from "@/lib/db";
+import { getT } from "@/lib/lang";
 
 /** Everything except the TV screen: header, centered column, footer. */
 export default async function SiteLayout({ children }: LayoutProps<"/">) {
   const admin = await isAdmin();
   const db = await readDb();
+  const { t } = await getT();
   const club = db.settings.club;
   const meId = await currentPlayerId();
   const mePlayer = meId ? db.players.find((p) => p.id === meId) : undefined;
@@ -18,12 +20,12 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
         {club.name}
         {STORAGE_KIND === "file" ? (
           <>
-            {" "}
-            · runs locally · data lives in <code className="font-mono">data/db.json</code> · daily backups in <code className="font-mono">data/backups/</code>
+            {" · "}
+            {t.nav.footerLocal.split(/(\{file\}|\{dir\})/).map((part, i) =>
+              part === "{file}" ? <code key={i} className="font-mono">data/db.json</code> : part === "{dir}" ? <code key={i} className="font-mono">data/backups/</code> : part,
+            )}
           </>
-        ) : (
-          <> · daily snapshots kept in the database · export any time from Admin</>
-        )}
+        ) : null}
       </footer>
     </>
   );

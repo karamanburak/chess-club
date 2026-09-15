@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useT } from "./I18nProvider";
 
 /**
  * Two-step destructive action: first click arms it, second click runs the action.
@@ -9,7 +10,7 @@ import { useEffect, useState, useTransition, type ReactNode } from "react";
 export function ConfirmButton({
   action,
   children,
-  confirmLabel = "Yes, do it",
+  confirmLabel,
   className = "btn btn-danger",
   disabled,
   title,
@@ -21,6 +22,7 @@ export function ConfirmButton({
   disabled?: boolean;
   title?: string;
 }) {
+  const { t } = useT();
   const [armed, setArmed] = useState(false);
   const [pending, start] = useTransition();
 
@@ -41,7 +43,7 @@ export function ConfirmButton({
     <span className="inline-flex items-center gap-1.5 fade-up">
       <button
         type="button"
-        className="btn btn-sm bg-loss/90 border-loss text-white hover:bg-loss"
+        className="btn btn-sm btn-confirm"
         disabled={pending}
         onClick={() =>
           start(async () => {
@@ -50,10 +52,10 @@ export function ConfirmButton({
           })
         }
       >
-        {pending ? "…" : confirmLabel}
+        {pending ? "…" : (confirmLabel ?? t.pairing.confirmDefault)}
       </button>
       <button type="button" className="btn btn-sm btn-ghost" onClick={() => setArmed(false)} disabled={pending}>
-        Cancel
+        {t.common.cancel}
       </button>
     </span>
   );

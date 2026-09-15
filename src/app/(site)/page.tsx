@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
-import { currentPlayerId } from "@/lib/auth";
-import { currentSeason, daysUntil, highlights, seasonTable, titleFor } from "@/lib/club";
+import { currentPlayerId, isAdmin } from "@/lib/auth";
+import { getT } from "@/lib/lang";
+import { fmt, plural } from "@/lib/i18n";
+import { currentSeason, daysUntil, highlights, seasonOverdue, titleFor } from "@/lib/club";
 import { activeSession, completedGames, formatDateTime, leaderboard, playerMap, rankChanges, recentForm, ratingTrend, resultLabel, sessionRoundComplete, streaks } from "@/lib/queries";
 import { Avatar, Empty, FormDots, PlayerLink, Provisional, Rank, RankMove, RatingDelta, Section, StatusBadge, StreakBadge, TitleBadge } from "@/components/ui";
 import { Icon, KnightMark } from "@/components/icons";
@@ -13,6 +15,7 @@ const PAGE = 10;
 
 export default async function Home({ searchParams }: PageProps<"/">) {
   const sp = await searchParams;
+  const { t, lang } = await getT();
   const db = await readDb();
   const board = leaderboard(db);
   const pages = Math.max(1, Math.ceil(board.length / PAGE));
@@ -30,69 +33,72 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const moves = rankChanges(db);
   const club = db.settings.club;
   const season = currentSeason(db);
-  const leader = season ? (seasonTable(db, season).find((r) => r.games >= 3) ?? null) : null;
   const next = daysUntil(club.nextNight);
-  const nextLabel = next === null || next < 0 ? null : next === 0 ? "tonight" : next === 1 ? "tomorrow" : `in ${next} days`;
-  const hl = highlights(db);
+  const nextLabel = next === null || next < 0 ? null : next === 0 ? t.common.tonight : next === 1 ? t.common.tomorrow : fmt(t.common.inDays, { n: next });
+  const hl = highlights(db, 14, t.club.highlights);
   const me = await currentPlayerId();
+  const admin = await isAdmin();
+  const overdue = season && admin ? seasonOverdue(season) : null;
 
   return (
     <>
-      <section className="card board-texture mb-6 relative overflow-hidden p-6 md:p-8">
-        <KnightMark className="pointer-events-none select-none absolute -right-8 -top-8 h-64 w-64 text-fg opacity-[0.05]" style={{ ["--knight-eye" as string]: "transparent" }} />
-        <div className="relative flex flex-wrap items-start justify-between gap-6">
-          <div className="min-w-0 flex items-start gap-5">
-            <span className="hidden sm:grid h-20 w-20 place-items-center rounded-2xl bg-accent text-accent-fg shadow-[inset_0_-3px_0_rgba(0,0,0,.18)] shrink-0">
-              <KnightMark className="h-14 w-14" />
-            </span>
-            <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted flex flex-wrap gap-x-2">
-              {club.founded && <span>Est. {club.founded}</span>}
-              {season && <span>{club.founded ? "· " : ""}{season.name}</span>}
-            </div>
-            <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight mt-1 leading-none">{club.name}</h1>
-            <QuoteOfTheDay className="mt-3 max-w-2xl" />
-            <div className="flex flex-wrap gap-2 mt-4 text-sm">
-              {club.meets && <span className="badge border-line text-muted py-1 px-2.5">📍 {club.meets}</span>}
-              {nextLabel && <span className="badge border-accent/40 text-accent py-1 px-2.5"><Icon name="pawn" className="h-3.5 w-3.5" /> Next club night {nextLabel}</span>}
-              {leader && (
-                <Link href="/hall-of-fame" className="badge border-line py-1 px-2.5 hover:border-accent/60">
-                  <Icon name="crown" className="h-3.5 w-3.5 text-accent" /> {season?.name} leader: <span className="font-medium">{names.get(leader.playerId)?.name}</span> · {leader.points} pts
-                </Link>
-              )}
-            </div>
-            </div>
+      <section className="card board-texture mb-6 relative overflow-hidden p-5 md:p-6">
+        <KnightMark className="pointer-events-none select-none absolute -right-6 -top-6 h-44 w-44 text-fg opacity-[0.04]" style={{ ["--knight-eye" as string]: "transparent" }} />
+        <div className="relative flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
+          <div className="min-w-0 flex-1 flex flex-col gap-2">
+            <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight leading-tight">{club.name}</h1>
+            {(club.meets || nextLabel) && (
+              <p className="text-sm text-muted flex flex-wrap items-center gap-x-2">
+                {nextLabel && (
+                  <span className="text-accent inline-flex items-center gap-1.5">
+                    <Icon name="pawn" className="h-3.5 w-3.5" /> {fmt(t.home.nextNight, { when: nextLabel })}
+                  </span>
+                )}
+                {club.meets && nextLabel && <span aria-hidden>·</span>}
+                {club.meets && <span>{club.meets}</span>}
+              </p>
+            )}
+            <QuoteOfTheDay size="sm" className="mt-1 max-w-xl" />
           </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
+          <div className="flex flex-wrap gap-2 shrink-0 sm:justify-end">
             <Link href="/pairing" className="btn btn-primary">
-              <Icon name="pawn" className="h-4 w-4" /> {night ? "Back to club night" : "Start club night"}
+              <Icon name="pawn" className="h-4 w-4" /> {night ? t.home.backToNight : t.home.startNight}
             </Link>
             <Link href="/tournaments" className="btn">
-              New tournament
+              {t.home.newTournament}
+            </Link>
+            <Link href="/tv" target="_blank" className="btn btn-ghost" title={t.common.tvHint} aria-label={t.common.tv}>
+              <Icon name="tv" className="h-4 w-4" />
             </Link>
           </div>
         </div>
-        {club.announcement && <div className="relative mt-5 rounded-xl border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm flex items-start gap-2"><Icon name="pin" className="h-4 w-4 mt-0.5 shrink-0 text-accent" /> <span>{club.announcement}</span></div>}
+        {overdue && (
+          <Link href="/admin#seasons" className="relative mt-4 rounded-xl border border-accent/40 bg-accent/10 px-4 py-2.5 text-sm flex items-start gap-2 hover:border-accent/70 transition-colors">
+            <Icon name="trophy" className="h-4 w-4 mt-0.5 shrink-0 text-accent" />
+            <span>{fmt(t.home.seasonOverdue, { season: season!.name, months: overdue })}</span>
+          </Link>
+        )}
+        {club.announcement && <div className="relative mt-4 rounded-xl border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm flex items-start gap-2"><Icon name="pin" className="h-4 w-4 mt-0.5 shrink-0 text-accent" /> <span>{club.announcement}</span></div>}
       </section>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="stat">
-          <span className="stat-label">Active players</span>
+          <span className="stat-label">{t.home.activePlayers}</span>
           <span className="stat-value">{board.length}</span>
         </div>
         <div className="stat">
-          <span className="stat-label">Games played</span>
+          <span className="stat-label">{t.home.gamesPlayed}</span>
           <span className="stat-value">{played.length}</span>
         </div>
         <div className="stat">
-          <span className="stat-label">Tournaments</span>
+          <span className="stat-label">{t.home.tournaments}</span>
           <span className="stat-value">
             {db.tournaments.length}
-            {open.length > 0 && <span className="text-sm text-accent ml-2">{open.length} live</span>}
+            {open.length > 0 && <span className="text-sm text-accent ml-2">{fmt(t.home.nLive, { n: open.length })}</span>}
           </span>
         </div>
         <div className="stat">
-          <span className="stat-label">Top rated</span>
+          <span className="stat-label">{t.home.topRated}</span>
           {top ? (
             <span className="flex items-center gap-2 min-w-0">
               <Avatar id={top.id} name={top.name} size="sm" />
@@ -107,26 +113,26 @@ export default async function Home({ searchParams }: PageProps<"/">) {
 
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <Section
-          title="Rankings"
+          title={t.home.rankings}
           flush
           right={
             <span className="flex items-center gap-2">
-              {pages > 1 && <Pager page={page} pages={pages} />}
+              {pages > 1 && <Pager page={page} pages={pages} labels={{ prev: t.home.prevPage, next: t.home.nextPage }} />}
               <Link href="/h2h" className="btn btn-sm btn-ghost">
-                Head-to-head
+                {t.home.headToHead}
               </Link>
               <Link href="/players" className="btn btn-sm btn-ghost">
-                Manage →
+                {t.common.manage}
               </Link>
             </span>
           }
         >
           {board.length === 0 ? (
-            <Empty icon="♞" title="No players yet">
+            <Empty icon="pawn" title={t.home.noPlayers}>
               <Link className="text-accent hover:underline" href="/players">
-                Add the first player
+                {t.home.addFirstPlayer}
               </Link>{" "}
-              to get started.
+              {t.home.toGetStarted}
             </Empty>
           ) : (
             <div className="scroll-x">
@@ -134,11 +140,11 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                 <thead>
                   <tr>
                     <th className="w-16">#</th>
-                    <th>Player</th>
-                    <th className="text-right">Elo</th>
-                    <th className="hidden md:table-cell">Form</th>
-                    <th className="text-right hidden md:table-cell">Games</th>
-                    <th className="text-right">W / D / L</th>
+                    <th>{t.common.player}</th>
+                    <th className="text-right">{t.common.elo}</th>
+                    <th className="hidden md:table-cell">{t.common.form}</th>
+                    <th className="text-right hidden md:table-cell">{t.common.games}</th>
+                    <th className="text-right">{t.common.wdl}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -157,7 +163,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                         <td className="font-medium">
                           <span className="flex items-center gap-2 nowrap">
                             <PlayerLink id={p.id} name={p.name} avatar />
-                            {p.id === me && <span className="badge border-accent/40 text-accent">you</span>}
+                            {p.id === me && <span className="badge border-accent/40 text-accent">{t.common.you}</span>}
                             <TitleBadge title={titleFor(p)} compact />
                             <Provisional games={p.gamesPlayed} />
                             <StreakBadge streak={st.current} />
@@ -166,7 +172,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                         <td className="text-right nowrap">
                           <span className={`font-mono text-base ${i === 0 ? "text-accent" : ""}`}>{p.rating}</span>
                           {trend !== null && trend !== 0 && (
-                            <span className={`block font-mono text-[11px] leading-tight ${trend > 0 ? "text-win" : "text-loss"}`} title="Rating change over the last 5 games">
+                            <span className={`block font-mono text-[11px] leading-tight ${trend > 0 ? "text-win" : "text-loss"}`} title={t.home.trendHint}>
                               {trend > 0 ? "+" : ""}
                               {trend}
                             </span>
@@ -190,10 +196,8 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               </table>
               {pages > 1 && (
                 <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-line text-xs text-muted">
-                  <span>
-                    Players {offset + 1}–{offset + shown.length} of {board.length}
-                  </span>
-                  <Pager page={page} pages={pages} />
+                  <span>{fmt(t.home.playersRange, { from: offset + 1, to: offset + shown.length, total: board.length })}</span>
+                  <Pager page={page} pages={pages} labels={{ prev: t.home.prevPage, next: t.home.nextPage }} />
                 </div>
               )}
             </div>
@@ -202,7 +206,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
 
         <div className="col-stack">
           {hl.length > 0 && (
-            <Section title="Around the club" right={<Link href="/hall-of-fame" className="btn btn-sm btn-ghost">Hall of Fame →</Link>}>
+            <Section title={t.home.aroundTheClub} right={<Link href="/hall-of-fame" className="btn btn-sm btn-ghost">{t.home.hallOfFame}</Link>}>
               <ul className="flex flex-col gap-3 -my-1">
                 {hl.map((h) => (
                   <li key={h.key} className="flex items-start gap-3">
@@ -230,36 +234,36 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             <Link href="/pairing" className="card border-accent/40 hover:border-accent/70 transition-colors flex items-center gap-4">
               <span className="text-3xl">♟</span>
               <span className="flex-1 min-w-0">
-                <span className="block font-semibold">Club night in progress</span>
+                <span className="block font-semibold">{t.home.nightInProgress}</span>
                 <span className="block text-sm text-muted">
-                  Round {nightRound.number} · {nightRound.pairings.length} boards ·{" "}
-                  {sessionRoundComplete(db, nightRound) ? "all results in" : `${nightPending} still playing`}
+                  {fmt(t.common.roundN, { n: nightRound.number })} · {plural(nightRound.pairings.length, t.common.boardsN)} ·{" "}
+                  {sessionRoundComplete(db, nightRound) ? t.home.allResultsIn : fmt(t.home.stillPlaying, { n: nightPending })}
                 </span>
               </span>
               <span className="text-muted">→</span>
             </Link>
           )}
 
-          <Section title="Tournaments" right={<Link href="/tournaments" className="btn btn-sm btn-ghost">All →</Link>}>
+          <Section title={t.home.tournaments} right={<Link href="/tournaments" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
             {open.length === 0 ? (
               <p className="text-sm text-muted">
-                Nothing running.{" "}
+                {t.home.nothingRunning}{" "}
                 <Link className="text-accent hover:underline" href="/tournaments">
-                  Create one.
+                  {t.home.createOne}
                 </Link>
               </p>
             ) : (
               <ul className="flex flex-col divide-y divide-line/60 -my-2">
-                {open.map((t) => (
-                  <li key={t.id}>
-                    <Link href={`/tournaments/${t.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-accent transition-colors">
+                {open.map((tr) => (
+                  <li key={tr.id}>
+                    <Link href={`/tournaments/${tr.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-accent transition-colors">
                       <span className="min-w-0">
-                        <span className="block font-medium truncate">{t.name}</span>
+                        <span className="block font-medium truncate">{tr.name}</span>
                         <span className="block text-xs text-muted">
-                          {t.participantIds.length} players · round {t.rounds.length} of {t.plannedRounds}
+                          {plural(tr.participantIds.length, t.common.playersN)} · {fmt(t.common.roundNofTotal, { n: tr.rounds.length, total: tr.plannedRounds })}
                         </span>
                       </span>
-                      <StatusBadge status={t.status} />
+                      <StatusBadge status={tr.status} />
                     </Link>
                   </li>
                 ))}
@@ -267,9 +271,9 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             )}
           </Section>
 
-          <Section title="Recent games" right={<Link href="/games" className="btn btn-sm btn-ghost">All →</Link>}>
+          <Section title={t.home.recentGames} right={<Link href="/games" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
             {recent.length === 0 ? (
-              <p className="text-sm text-muted">No games recorded yet.</p>
+              <p className="text-sm text-muted">{t.home.noGamesHint}</p>
             ) : (
               <ul className="flex flex-col divide-y divide-line/60 -my-2 text-sm">
                 {recent.map((g) => {
@@ -288,7 +292,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                         <PlayerLink id={g.blackId} name={b} />
                         <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-1.5" />
                       </span>
-                      <span className="text-[11px] text-muted whitespace-nowrap hidden sm:inline">{g.completedAt && formatDateTime(g.completedAt)}</span>
+                      <span className="text-[11px] text-muted whitespace-nowrap hidden sm:inline">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
                     </li>
                   );
                 })}
@@ -301,17 +305,17 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   );
 }
 
-function Pager({ page, pages }: { page: number; pages: number }) {
+function Pager({ page, pages, labels }: { page: number; pages: number; labels: { prev: string; next: string } }) {
   const href = (n: number) => (n <= 1 ? "/" : `/?page=${n}`);
   return (
     <span className="inline-flex items-center gap-1 text-xs">
-      <Link href={href(page - 1)} className={`btn btn-sm ${page === 1 ? "pointer-events-none opacity-40" : ""}`} aria-label="Previous page">
+      <Link href={href(page - 1)} className={`btn btn-sm ${page === 1 ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.prev}>
         ←
       </Link>
       <span className="text-muted px-2 font-mono">
         {page} / {pages}
       </span>
-      <Link href={href(page + 1)} className={`btn btn-sm ${page === pages ? "pointer-events-none opacity-40" : ""}`} aria-label="Next page">
+      <Link href={href(page + 1)} className={`btn btn-sm ${page === pages ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.next}>
         →
       </Link>
     </span>

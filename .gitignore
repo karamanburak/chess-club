@@ -43,3 +43,7 @@ next-env.d.ts
 
 # club data (local JSON mode) – contains the admin hash and session secret, never commit
 /data/
+
+# demo club written by .claude/skills/seed-demo
+/.demo-data/
+/.next-check/

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { readDb } from "@/lib/db";
 import { isMember } from "@/lib/auth";
+import { getT } from "@/lib/lang";
 import { joinClub } from "@/lib/actions";
 import { KnightMark } from "@/components/icons";
 import { QuoteOfTheDay } from "@/components/QuoteOfTheDay";
@@ -13,6 +14,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
   const sp = await searchParams;
   const next = typeof sp.next === "string" && sp.next.startsWith("/") ? sp.next : "/";
   if (await isMember()) redirect(next);
+  const { t } = await getT();
   const club = (await readDb()).settings.club;
   const wrong = sp.error === "wrong";
 
@@ -23,18 +25,18 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
           <KnightMark className="h-14 w-14" />
         </span>
         <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Members only</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">{t.me.join.membersOnly}</div>
           <h1 className="font-display text-4xl font-semibold tracking-tight mt-1">{club.name}</h1>
         </div>
         <form action={joinClub} className="card w-full flex flex-col gap-3 text-left">
           <input type="hidden" name="next" value={next} />
           <label className="label" htmlFor="code">
-            Member code
+            {t.me.join.memberCode}
           </label>
-          <input id="code" name="code" type="text" required autoFocus autoComplete="off" autoCapitalize="characters" className="w-full text-center font-mono text-lg tracking-widest" placeholder="Ask at the club" />
-          {wrong && <p className="text-sm text-loss">That code is not right. Ask a member or the admin.</p>}
-          <SubmitButton pendingText="Checking…">Enter the club</SubmitButton>
-          <p className="text-xs text-muted">Asked once; this device is remembered for 90 days.</p>
+          <input id="code" name="code" type="text" required autoFocus autoComplete="off" autoCapitalize="characters" className="w-full text-center font-mono text-lg tracking-widest" placeholder={t.me.join.placeholder} />
+          {wrong && <p className="text-sm text-loss">{t.me.join.wrongCode}</p>}
+          <SubmitButton pendingText={t.me.join.checking}>{t.me.join.enter}</SubmitButton>
+          <p className="text-xs text-muted">{t.me.join.remembered}</p>
         </form>
         <QuoteOfTheDay className="max-w-sm" />
       </div>
