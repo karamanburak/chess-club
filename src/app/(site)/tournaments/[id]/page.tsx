@@ -387,6 +387,7 @@ export default async function TournamentPage({
                     finished={finished}
                     ko={t.knockout}
                     me={me}
+                    admin={admin}
                     msg={msg}
                   />
                 </PairingReveal>
@@ -454,6 +455,8 @@ export default async function TournamentPage({
                         names={names}
                         finished={finished}
                         ko={t.knockout}
+                        me={me}
+                        admin={admin}
                         msg={msg}
                       />
                     </div>
@@ -466,7 +469,7 @@ export default async function TournamentPage({
         <div className="col-stack">
           {isKO && placement.length > 0 && t.rounds.length > 0 && (
             <Section title={msg.tournaments.placement} flush>
-              <table className="table">
+              <table className="table [&_th]:px-2 [&_td]:px-2">
                 <thead>
                   <tr>
                     <th className="w-10 text-center">#</th>
@@ -539,17 +542,17 @@ export default async function TournamentPage({
                         <th className="w-10 text-center">#</th>
                         <th>{msg.common.player}</th>
                         <th className="text-right">{msg.common.points}</th>
-                        {tiebreakCols.map((k) => (
+                        {tiebreakCols.map((k, i) => (
                           <th
                             key={k}
-                            className="text-right"
+                            className={`text-right ${i >= 2 ? "hidden lg:table-cell" : ""}`}
                             title={`${msg.tournaments.tiebreaks[k].label}: ${msg.tournaments.tiebreaks[k].help}`}
                           >
                             {msg.tournaments.tiebreaks[k].short}
                           </th>
                         ))}
                         <th
-                          className="text-right hidden sm:table-cell"
+                          className="text-right hidden xl:table-cell"
                           title={msg.tournaments.perfTitle}
                         >
                           {msg.tournaments.perfShort}
@@ -598,10 +601,10 @@ export default async function TournamentPage({
                           <td className="text-right font-mono text-accent font-medium">
                             {r.points}
                           </td>
-                          {tiebreakCols.map((k) => (
+                          {tiebreakCols.map((k, i) => (
                             <td
                               key={k}
-                              className="text-right font-mono text-muted text-xs"
+                              className={`text-right font-mono text-muted text-xs ${i >= 2 ? "hidden lg:table-cell" : ""}`}
                             >
                               {k === "buchholz"
                                 ? r.buchholz
@@ -616,7 +619,7 @@ export default async function TournamentPage({
                                         : r.blackWins}
                             </td>
                           ))}
-                          <td className="text-right font-mono text-muted text-xs hidden sm:table-cell">
+                          <td className="text-right font-mono text-muted text-xs hidden xl:table-cell">
                             {r.performance ?? "–"}
                           </td>
                         </tr>
@@ -907,6 +910,7 @@ function RoundTable({
   finished,
   ko,
   me = null,
+  admin = false,
   msg,
 }: {
   round: Round;
@@ -914,8 +918,9 @@ function RoundTable({
   names: Map<string, Player>;
   finished: boolean;
   ko?: Tournament["knockout"];
-  /** The device's claimed player: their board is highlighted. */
+  /** The device's claimed player: their board is highlighted and only they (or the admin) may enter its result. */
   me?: string | null;
+  admin?: boolean;
   msg: Dict;
 }) {
   const gameLabel = (gameId: string) => {
@@ -1003,13 +1008,15 @@ function RoundTable({
                   {g ? (
                     finished ? (
                       <span className="font-mono">{resultLabel(g.result)}</span>
-                    ) : (
+                    ) : admin || mine ? (
                       <ResultButtons
                         gameId={g.id}
                         current={g.result}
                         names={{ white: wn, black: bn }}
                         allowSwap
                       />
+                    ) : (
+                      <span className="font-mono" title={msg.common.onlyOwnBoard}>{resultLabel(g.result)}</span>
                     )
                   ) : (
                     <span className="text-loss text-xs">{msg.tournaments.game.missing}</span>

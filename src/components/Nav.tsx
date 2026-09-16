@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ThemeToggle } from "./ThemeToggle";
 import { FaceSvg } from "./Face";
 import { Icon, KnightMark } from "./icons";
-import { LangToggle } from "./LangToggle";
+import { PrefsMenu } from "./PrefsMenu";
 import { useT } from "./I18nProvider";
 import { fmt, type Dict } from "@/lib/i18n";
 
@@ -148,8 +147,7 @@ export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string;
               <Icon name="users" className="h-4 w-4" /> <span className="hidden sm:inline">{t.nav.whoAreYou}</span>
             </Link>
           )}
-          <LangToggle />
-          <ThemeToggle />
+          <PrefsMenu />
           {admin && (
             <Link href="/admin" className={`badge py-1 ${path.startsWith("/admin") ? "border-accent/60 text-accent" : "border-win/40 text-win"}`} title={t.nav.adminHint}>
               <Icon name="shield" className="h-3 w-3" />

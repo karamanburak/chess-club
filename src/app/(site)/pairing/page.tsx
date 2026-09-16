@@ -6,7 +6,7 @@ import { getT } from "@/lib/lang";
 import { fmt, plural, type Dict } from "@/lib/i18n";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { sessionAddPlayer, sessionClose, sessionDeleteLastRound, sessionNextRound, sessionRemovePlayer, sessionRepair, sessionStart } from "@/lib/actions";
-import { activeSession, colorStats, formatDate, formatDateTime, leaderboard, playerMap, roundHasResults, sessionRoundComplete, sessionSummary } from "@/lib/queries";
+import { activeSession, colorStats, resultLabel, formatDate, formatDateTime, leaderboard, playerMap, roundHasResults, sessionRoundComplete, sessionSummary } from "@/lib/queries";
 import { ResultButtons } from "@/components/ResultButtons";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmButton } from "@/components/ConfirmButton";
@@ -159,6 +159,14 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
       />
 
       <AutoRefresh seconds={10} />
+      {!me && !admin && round && !reveal && (
+        <Link href="/me" className="card mb-4 border-line bg-panel-2/40 flex items-center gap-3 text-sm hover:border-accent/60 transition-colors no-print">
+          <Icon name="users" className="h-5 w-5 text-accent shrink-0" />
+          <span>
+            {t.common.claimToEnter} <span className="text-accent font-medium">{t.common.whoAreYou} →</span>
+          </span>
+        </Link>
+      )}
       {(myBoard || myBye) && !reveal && (
         <div className="card mb-4 border-accent/50 bg-accent/5 flex items-center gap-3 no-print">
           <Avatar id={me!} name={names.get(me!)?.name ?? "?"} size="md" />
@@ -210,7 +218,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
                 >
                   <div className="grid gap-3 sm:grid-cols-2 content-start">
                     {round.pairings.map((p) => (
-                      <BoardCard key={p.gameId} p={p} g={games.get(p.gameId)} names={names} me={me} t={t} />
+                      <BoardCard key={p.gameId} p={p} g={games.get(p.gameId)} names={names} me={me} admin={admin} t={t} />
                     ))}
                     {round.byePlayerId && (
                       <div className="card border-dashed flex items-center gap-3 text-muted">
@@ -268,7 +276,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
                   <th className="w-10 text-center">#</th>
                   <th>{t.common.player}</th>
                   <th className="text-right">{t.common.points}</th>
-                  <th className="text-right hidden sm:table-cell">{t.common.games}</th>
+                  <th className="text-right hidden lg:table-cell">{t.common.games}</th>
                   <th className="text-right">{t.pairing.eloDelta}</th>
                   <th className="w-8"></th>
                 </tr>
@@ -283,7 +291,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
                         <PlayerLink id={r.playerId} name={names.get(r.playerId)?.name ?? "?"} avatar className="font-medium" />
                       </td>
                       <td className="text-right font-mono text-accent">{r.points}</td>
-                      <td className="text-right font-mono text-muted hidden sm:table-cell">{r.games}</td>
+                      <td className="text-right font-mono text-muted hidden lg:table-cell">{r.games}</td>
                       <td className={`text-right font-mono text-xs ${r.ratingChange > 0 ? "text-win" : r.ratingChange < 0 ? "text-loss" : "text-muted"}`}>
                         {r.ratingChange > 0 ? "+" : ""}
                         {r.ratingChange}
@@ -328,13 +336,14 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
   );
 }
 
-function BoardCard({ p, g, names, me, t }: { p: SessionRound["pairings"][number]; g: Game | undefined; names: Map<string, Player>; me: string | null; t: Dict }) {
+function BoardCard({ p, g, names, me, admin, t }: { p: SessionRound["pairings"][number]; g: Game | undefined; names: Map<string, Player>; me: string | null; admin: boolean; t: Dict }) {
   const res = g?.result ?? null;
   const w = names.get(p.whiteId);
   const b = names.get(p.blackId);
   const whiteWon = res === "1-0" || res === "+/-";
   const blackWon = res === "0-1" || res === "-/+";
   const mine = !!me && (p.whiteId === me || p.blackId === me);
+  const canEdit = admin || mine;
   return (
     <div className={`card flex flex-col gap-3 transition-colors ${res ? "border-win/30" : "border-accent/30"} ${mine ? "ring-2 ring-accent/50" : ""}`}>
       <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted">
@@ -348,7 +357,15 @@ function BoardCard({ p, g, names, me, t }: { p: SessionRound["pairings"][number]
       <Side color="black" id={p.blackId} name={b?.name ?? "?"} rating={g?.blackRatingBefore ?? b?.rating ?? null} before={g?.blackRatingBefore ?? null} after={g?.blackRatingAfter ?? null} dim={whiteWon} won={blackWon} />
       <div className="pt-1 border-t border-line/60 flex items-center justify-between gap-2">
         <span className="text-xs text-muted">{t.common.result}</span>
-        {g ? <ResultButtons gameId={g.id} current={g.result} names={{ white: w?.name ?? "?", black: b?.name ?? "?" }} allowSwap /> : <span className="text-xs text-muted">{t.pairing.recorded}</span>}
+        {!g ? (
+          <span className="text-xs text-muted">{t.pairing.recorded}</span>
+        ) : canEdit ? (
+          <ResultButtons gameId={g.id} current={g.result} names={{ white: w?.name ?? "?", black: b?.name ?? "?" }} allowSwap />
+        ) : (
+          <span className="font-mono text-sm px-2 py-0.5 rounded-md bg-panel-2 border border-line" title={t.common.onlyOwnBoard}>
+            {resultLabel(g.result)}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -45,8 +45,9 @@ export default async function Home({ searchParams }: PageProps<"/">) {
       <section className="card board-texture mb-6 relative overflow-hidden p-5 md:p-6">
         <KnightMark className="pointer-events-none select-none absolute -right-6 -top-6 h-44 w-44 text-fg opacity-[0.04]" style={{ ["--knight-eye" as string]: "transparent" }} />
         <div className="relative flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
-          <div className="min-w-0 flex-1 flex flex-col gap-2">
-            <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight leading-tight">{club.name}</h1>
+          <div className="min-w-0 flex-1 flex flex-col gap-3">
+            <h1 className="sr-only">{club.name}</h1>
+            <QuoteOfTheDay size="md" className="max-w-2xl" />
             {(club.meets || nextLabel) && (
               <p className="text-sm text-muted flex flex-wrap items-center gap-x-2">
                 {nextLabel && (
@@ -58,7 +59,6 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                 {club.meets && <span>{club.meets}</span>}
               </p>
             )}
-            <QuoteOfTheDay size="sm" className="mt-1 max-w-xl" />
           </div>
           <div className="flex flex-wrap gap-2 shrink-0 sm:justify-end">
             <Link href="/pairing" className="btn btn-primary">
@@ -142,8 +142,8 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                     <th className="w-16">#</th>
                     <th>{t.common.player}</th>
                     <th className="text-right">{t.common.elo}</th>
-                    <th className="hidden md:table-cell">{t.common.form}</th>
-                    <th className="text-right hidden md:table-cell">{t.common.games}</th>
+                    <th className="hidden lg:table-cell">{t.common.form}</th>
+                    <th className="text-right hidden lg:table-cell">{t.common.games}</th>
                     <th className="text-right">{t.common.wdl}</th>
                   </tr>
                 </thead>
@@ -161,7 +161,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                           </span>
                         </td>
                         <td className="font-medium">
-                          <span className="flex items-center gap-2 nowrap">
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             <PlayerLink id={p.id} name={p.name} avatar />
                             {p.id === me && <span className="badge border-accent/40 text-accent">{t.common.you}</span>}
                             <TitleBadge title={titleFor(p)} compact />
@@ -178,10 +178,10 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                             </span>
                           )}
                         </td>
-                        <td className="hidden md:table-cell">
+                        <td className="hidden lg:table-cell">
                           <FormDots results={recentForm(db, p.id)} />
                         </td>
-                        <td className="text-right font-mono text-muted hidden md:table-cell">{p.gamesPlayed}</td>
+                        <td className="text-right font-mono text-muted hidden lg:table-cell">{p.gamesPlayed}</td>
                         <td className="text-right font-mono text-xs nowrap">
                           <span className="text-win">{p.wins}</span>
                           <span className="text-muted"> / </span>

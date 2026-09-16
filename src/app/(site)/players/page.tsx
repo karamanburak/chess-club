@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Icon } from "@/components/icons";
 import { Suspense } from "react";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
@@ -56,10 +57,10 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                   <tr>
                     <th>{t.players.list.name}</th>
                     <th className="text-right">{t.common.elo}</th>
-                    <th className="text-right hidden sm:table-cell">{t.players.list.start}</th>
-                    <th className="hidden md:table-cell">{t.common.form}</th>
+                    <th className="text-right hidden lg:table-cell">{t.players.list.start}</th>
+                    <th className="hidden xl:table-cell">{t.common.form}</th>
                     <th className="text-right">{t.common.games}</th>
-                    <th className="text-right hidden sm:table-cell">{t.common.wdl}</th>
+                    <th className="text-right hidden md:table-cell">{t.common.wdl}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -74,16 +75,16 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                         </span>
                       </td>
                       <td className="text-right font-mono text-accent">{p.rating}</td>
-                      <td className="text-right font-mono text-muted hidden sm:table-cell">{p.initialRating}</td>
-                      <td className="hidden md:table-cell">
+                      <td className="text-right font-mono text-muted hidden lg:table-cell">{p.initialRating}</td>
+                      <td className="hidden xl:table-cell">
                         <FormDots results={recentForm(db, p.id)} />
                       </td>
                       <td className="text-right font-mono">{p.gamesPlayed}</td>
-                      <td className="text-right font-mono text-xs hidden sm:table-cell nowrap">
+                      <td className="text-right font-mono text-xs hidden md:table-cell nowrap">
                         <span className="text-win">{p.wins}</span> / <span className="text-draw">{p.draws}</span> / <span className="text-loss">{p.losses}</span>
                       </td>
                       <td className="text-right">
-                        <Link href={`/players/${p.id}`} className="btn btn-sm btn-ghost">
+                        <Link href={`/players/${p.id}`} className="btn btn-sm btn-ghost px-2">
                           {admin ? t.players.list.edit : t.players.list.view}
                         </Link>
                       </td>
@@ -168,12 +169,20 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
             <p className="text-xs text-muted -mt-2 mb-3">{t.players.list.friendly.hint}</p>
             {active.length < 2 ? (
               <p className="text-sm text-muted">{t.players.list.friendly.needTwo}</p>
+            ) : !admin && !me ? (
+              /* Members may only record games they played themselves, so an anonymous device gets a pointer instead of the form. */
+              <Link href="/me" className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/40 px-4 py-3 text-sm hover:border-accent/60 transition-colors">
+                <Icon name="users" className="h-5 w-5 text-accent shrink-0" />
+                <span>
+                  {t.common.claimToEnter} <span className="text-accent font-medium">{t.common.whoAreYou} →</span>
+                </span>
+              </Link>
             ) : (
               <form action={recordFriendlyGame} className="flex flex-col gap-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="label">⚪ {t.common.white}</label>
-                    <select name="whiteId" required className="w-full">
+                    <select name="whiteId" required className="w-full" defaultValue={!admin && me ? me.id : undefined}>
                       {active.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name} ({p.rating})

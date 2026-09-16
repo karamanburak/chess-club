@@ -17,7 +17,8 @@ export function kFactor(player: { gamesPlayed: number; rating: number }): number
   return 20;
 }
 
-export const PROVISIONAL_GAMES = 30;
+/** Games before the "P" badge disappears. Only the badge: the K factor above keeps its own 30-game rule. */
+export const PROVISIONAL_GAMES = 10;
 
 export function scoreFor(result: GameResult, color: "white" | "black"): number {
   if (result === "1/2-1/2") return 0.5;

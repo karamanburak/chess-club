@@ -13,6 +13,9 @@ export function SearchBox({ placeholder }: { placeholder?: string }) {
   const [value, setValue] = useState(params.get("q") ?? "");
 
   useEffect(() => {
+    // Only act when the typed value differs from the URL. Otherwise every navigation (e.g. to ?page=2)
+    // re-ran this effect and the `page` reset below threw the visitor back to page 1.
+    if ((params.get("q") ?? "") === value) return;
     const timer = setTimeout(() => {
       const next = new URLSearchParams(params.toString());
       if (value) next.set("q", value);

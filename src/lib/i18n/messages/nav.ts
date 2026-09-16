@@ -18,6 +18,11 @@ const en = {
   chessClub: "chess club",
   themeToLight: "Switch to light theme",
   themeToDark: "Switch to dark theme",
+  preferences: "Preferences",
+  language: "Language",
+  theme: "Theme",
+  light: "Light",
+  dark: "Dark",
   footerLocal: "runs locally · data lives in {file} · daily backups in {dir}",
 };
 const de: typeof en = {
@@ -39,6 +44,11 @@ const de: typeof en = {
   chessClub: "schachverein",
   themeToLight: "Zum hellen Design wechseln",
   themeToDark: "Zum dunklen Design wechseln",
+  preferences: "Einstellungen",
+  language: "Sprache",
+  theme: "Design",
+  light: "Hell",
+  dark: "Dunkel",
   footerLocal: "läuft lokal · Daten liegen in {file} · tägliche Sicherungen in {dir}",
 };
 export const nav = { en, de };

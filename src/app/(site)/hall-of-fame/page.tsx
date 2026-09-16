@@ -61,10 +61,10 @@ export default async function HallOfFamePage() {
                       <th>{t.common.player}</th>
                       <th className="text-right">{t.common.points}</th>
                       <th className="text-right hidden sm:table-cell">{t.common.games}</th>
-                      <th className="text-right hidden md:table-cell">{t.common.wdl}</th>
+                      <th className="text-right hidden lg:table-cell">{t.common.wdl}</th>
                       <th className="text-right hidden sm:table-cell">{t.hall.eloPlusMinus}</th>
-                      <th className="text-right hidden md:table-cell">{t.hall.nights}</th>
-                      <th className="text-right hidden md:table-cell">{t.hall.titles}</th>
+                      <th className="text-right hidden xl:table-cell">{t.hall.nights}</th>
+                      <th className="text-right hidden xl:table-cell">{t.hall.titles}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -78,15 +78,15 @@ export default async function HallOfFamePage() {
                         </td>
                         <td className="text-right font-mono text-accent">{r.points}</td>
                         <td className="text-right font-mono text-muted hidden sm:table-cell">{r.games}</td>
-                        <td className="text-right font-mono text-xs hidden md:table-cell nowrap">
+                        <td className="text-right font-mono text-xs hidden lg:table-cell nowrap">
                           <span className="text-win">{r.wins}</span> / <span className="text-draw">{r.draws}</span> / <span className="text-loss">{r.losses}</span>
                         </td>
                         <td className={`text-right font-mono text-xs hidden sm:table-cell ${r.ratingChange > 0 ? "text-win" : r.ratingChange < 0 ? "text-loss" : "text-muted"}`}>
                           {r.ratingChange > 0 ? "+" : ""}
                           {r.ratingChange}
                         </td>
-                        <td className="text-right font-mono text-muted hidden md:table-cell">{r.nights}</td>
-                        <td className="text-right hidden md:table-cell">{r.titles ? "🏆".repeat(r.titles) : <span className="text-muted">–</span>}</td>
+                        <td className="text-right font-mono text-muted hidden xl:table-cell">{r.nights}</td>
+                        <td className="text-right hidden xl:table-cell">{r.titles ? "🏆".repeat(r.titles) : <span className="text-muted">–</span>}</td>
                       </tr>
                     ))}
                   </tbody>

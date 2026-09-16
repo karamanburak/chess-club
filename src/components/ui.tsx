@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cache, type ReactNode } from "react";
 import { readDb } from "@/lib/db";
+import { PROVISIONAL_GAMES } from "@/lib/elo";
 import { getT } from "@/lib/lang";
 import { fmt, localeOf, plural } from "@/lib/i18n";
 import { FaceSvg } from "./Face";
@@ -146,10 +147,10 @@ export function Section({ title, right, children, flush }: { title: ReactNode; r
 }
 
 export async function Provisional({ games }: { games: number }) {
-  if (games >= 30) return null;
+  if (games >= PROVISIONAL_GAMES) return null;
   const { t } = await getT();
   return (
-    <span className="badge border-muted/40 text-muted" title={fmt(t.common.provisional, { games })}>
+    <span className="badge border-muted/40 text-muted" title={fmt(t.common.provisional, { games, total: PROVISIONAL_GAMES })}>
       P
     </span>
   );
@@ -166,15 +167,16 @@ export async function RankMove({ delta }: { delta: number | undefined }) {
   );
 }
 
+/** Winning streak length from which the badge appears. */
+const STREAK_BADGE_MIN = 5;
+
 export async function StreakBadge({ streak }: { streak: { kind: "W" | "D" | "L"; length: number } | null }) {
-  if (!streak || streak.length < 2) return null;
+  // Only a real winning run earns a badge (5+ in a row). Draw and loss streaks are never shown.
+  if (!streak || streak.kind !== "W" || streak.length < STREAK_BADGE_MIN) return null;
   const { t } = await getT();
-  const style = streak.kind === "W" ? "border-win/40 text-win bg-win/10" : streak.kind === "L" ? "border-loss/40 text-loss bg-loss/10" : "border-draw/40 text-draw";
   return (
-    <span className={`badge ${style}`} title={fmt(streak.kind === "W" ? t.common.streakWins : streak.kind === "L" ? t.common.streakLosses : t.common.streakDraws, { n: streak.length })}>
-      {streak.kind === "W" ? "🔥" : ""}
-      {streak.length}
-      {streak.kind}
+    <span className="badge border-win/40 text-win bg-win/10" title={fmt(t.common.streakWins, { n: streak.length })}>
+      🔥{streak.length}W
     </span>
   );
 }
@@ -192,6 +194,8 @@ export function Pill({ children, tone = "muted" }: { children: ReactNode; tone?:
 /** Club title (Novice … Club Grandmaster). Renders nothing for players without one yet. */
 export async function TitleBadge({ title, compact = false }: { title: Title | null; compact?: boolean }) {
   if (!title) return null;
+  // The compact badge (leaderboard rows) only marks the two top bands; lower titles would just add noise.
+  if (compact && title.key !== "master" && title.key !== "grandmaster") return null;
   const { t } = await getT();
   const label = t.club.titles[title.key as keyof typeof t.club.titles] ?? title.label;
   return (

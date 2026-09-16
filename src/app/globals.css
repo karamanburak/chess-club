@@ -139,13 +139,13 @@ body {
     @apply w-full text-sm;
   }
   .table th {
-    @apply text-left text-[11px] uppercase tracking-wider text-muted font-medium py-2.5 px-4 border-b border-line whitespace-nowrap;
+    @apply text-left text-[11px] uppercase tracking-wider text-muted font-medium py-2.5 px-3 border-b border-line whitespace-nowrap;
   }
   .table .nowrap {
     @apply whitespace-nowrap;
   }
   .table td {
-    @apply py-2.5 px-4 border-b border-line/50;
+    @apply py-2.5 px-3 border-b border-line/50;
   }
   .table tr:last-child td {
     @apply border-b-0;
