@@ -1,7 +1,7 @@
 // Hall of Fame page (src/app/(site)/hall-of-fame/page.tsx). Keep values plain strings; placeholders are {name}. `de` must mirror `en` exactly.
 const en = {
   modes: {
-    random: "Random",
+    random: "Open pairing",
     swiss: "Swiss",
     roundrobin: "Round robin",
     knockout: "Knockout",
@@ -43,7 +43,7 @@ const en = {
 };
 const de: typeof en = {
   modes: {
-    random: "Zufall",
+    random: "Freie Paarung",
     swiss: "Schweizer System",
     roundrobin: "Rundenturnier",
     knockout: "K.-o.",

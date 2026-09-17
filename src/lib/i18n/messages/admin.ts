@@ -86,6 +86,7 @@ const en = {
     submit: "Sign in",
   },
   // signed-in header
+  tabs: { label: "Admin sections", club: "Club", data: "Data", security: "Security" },
   eyebrow: "Signed in",
   title: "Admin",
   subtitle: "Edit and delete controls are now visible on player, tournament and club-night pages.",
@@ -380,6 +381,7 @@ const de: typeof en = {
     checking: "Prüfen…",
     submit: "Anmelden",
   },
+  tabs: { label: "Admin-Bereiche", club: "Verein", data: "Daten", security: "Sicherheit" },
   eyebrow: "Angemeldet",
   title: "Admin",
   subtitle: "Bearbeiten und Löschen ist jetzt auf den Spieler-, Turnier- und Vereinsabend-Seiten sichtbar.",

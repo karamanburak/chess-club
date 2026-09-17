@@ -7,7 +7,7 @@ const en = {
   noneYet: "No tournaments yet",
   noneYetHint: "Create one on the right. Pairings and colors are handled for you.",
   modes: {
-    random: { label: "Random", help: "Anyone can meet anyone. Rematches avoided, colors balanced." },
+    random: { label: "Open pairing", help: "Anyone can meet anyone, regardless of score. Rematches avoided, colors balanced. The round-robin alternative for large groups." },
     swiss: { label: "Swiss", help: "Players on similar scores meet. Standard for larger groups." },
     roundrobin: { label: "Round robin", help: "Everyone plays everyone once. Best for up to ~10 players." },
     knockout: { label: "Knockout", help: "Seeded bracket by rating: round of 16 → quarterfinals → semifinals → final. Ties get a tiebreak game." },
@@ -179,7 +179,7 @@ const de: typeof en = {
   noneYet: "Noch keine Turniere",
   noneYetHint: "Lege rechts eines an. Paarungen und Farben werden für dich erledigt.",
   modes: {
-    random: { label: "Zufall", help: "Jeder kann auf jeden treffen. Rückspiele werden vermieden, Farben ausgeglichen." },
+    random: { label: "Freie Paarung", help: "Jeder kann auf jeden treffen, unabhängig vom Punktestand. Rückspiele werden vermieden, Farben ausgeglichen. Die Rundenturnier-Alternative für große Gruppen." },
     swiss: { label: "Schweizer System", help: "Spieler mit ähnlicher Punktzahl treffen aufeinander. Standard für größere Gruppen." },
     roundrobin: { label: "Rundenturnier", help: "Jeder spielt einmal gegen jeden. Ideal bis ca. 10 Spieler." },
     knockout: { label: "K.-o.-System", help: "Nach Wertung gesetzter Turnierbaum: Achtelfinale → Viertelfinale → Halbfinale → Finale. Bei Gleichstand gibt es einen Stichkampf." },
