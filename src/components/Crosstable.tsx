@@ -20,8 +20,8 @@ export function Crosstable({ rows, table, msg }: { rows: StandingRow[]; table: M
       <table className="table table-compact text-center">
         <thead>
           <tr>
-            <th className="text-left">#</th>
-            <th className="text-left">{msg.common.player}</th>
+            <th className="text-left hidden sm:table-cell">#</th>
+            <th className="text-left sticky left-0 z-10 bg-panel">{msg.common.player}</th>
             {rows.map((_, i) => (
               <th key={i} className="text-center font-mono">
                 {i + 1}
@@ -33,11 +33,12 @@ export function Crosstable({ rows, table, msg }: { rows: StandingRow[]; table: M
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.playerId}>
-              <td className="text-left font-mono text-muted">{i + 1}</td>
-              <td className="text-left whitespace-nowrap">
+              <td className="text-left font-mono text-muted hidden sm:table-cell">{i + 1}</td>
+              <td className="text-left whitespace-nowrap sticky left-0 z-10 bg-panel shadow-[1px_0_0_var(--color-line)]">
                 <span className="inline-flex items-center gap-2">
+                  <span className="font-mono text-muted text-xs sm:hidden w-4">{i + 1}</span>
                   <Avatar id={r.playerId} name={r.name} size="xs" />
-                  <span className={r.withdrawn ? "line-through text-muted" : "font-medium"}>{r.name}</span>
+                  <span className={`max-w-24 sm:max-w-none truncate ${r.withdrawn ? "line-through text-muted" : "font-medium"}`}>{r.name}</span>
                 </span>
               </td>
               {rows.map((c, j) => {

@@ -23,6 +23,7 @@ export async function proxy(req: NextRequest) {
       { admin: req.cookies.get(ADMIN_COOKIE)?.value, member: req.cookies.get(MEMBER_COOKIE)?.value },
       db.settings.sessionSecret,
       db.settings.memberCodeHash,
+      db.settings.adminPasswordHash,
     );
     if (!ok) return to("/join");
   }

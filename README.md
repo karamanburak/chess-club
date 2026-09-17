@@ -7,7 +7,7 @@ with automatic daily snapshots in `data/backups/`.
 
 ```bash
 bun install
-bun run dev          # http://localhost:5173
+bun run dev          # http://localhost:3000
 bun run dev:lan      # also reachable from phones on the same Wi-Fi (URL shown on the Admin page)
 ```
 
@@ -42,13 +42,22 @@ bun run dev:lan      # also reachable from phones on the same Wi-Fi (URL shown o
   a seed (hair, face, shirt and colours; unique per player, changeable by the admin), line icons and medal ranks.
 - **Stats** – white/black/draw split, activity per month, rating race of the top players, monthly table (month champion),
   records (biggest upset, highest rating, longest streak).
-- **Admin** – password-protected (salted scrypt hash in the JSON file, signed httpOnly cookie). Only the admin can edit or
-  delete players, rounds, tournaments and club nights, change settings, download/import the database or restore a snapshot.
+- **Admin** – password-protected (salted scrypt hash in the JSON file, signed httpOnly cookie bound to that hash, so a
+  new password signs every other admin device out). Only the admin can edit or
+  delete players, rounds, tournaments and club nights, change settings, download/import the database, take, download,
+  restore or delete a snapshot, merge two records of the same person, and bulk-delete from the **Danger zone** (whole
+  club, history only, all tournaments, all club nights or all friendlies; a snapshot is taken first). **Sign out
+  everyone** rotates the cookie secret so every device has to sign in again. An optional **owner password** (Admin → Owner
+  password) puts a second lock on those destructive tools, for clubs where several people share the admin password: it is
+  asked per action, the admin password alone cannot change it, and only the recovery token can reset it.
   Everyone can add players, pair and enter results. The admin sign-in lives at `/admin` (no link in the header until
   signed in). An **activity log** on the Admin page lists every result, pairing and
   edit with a timestamp and whether it was done while signed in as admin, so changes made from phones on the network can be
-  traced.
-- **Member code** – optional single shared code for the whole club (Admin → Member code), like a Wi-Fi password.
+  traced; it can be searched and filtered by admin/guest. A **Data health** card runs the same consistency checks as the
+  `inspect-db` skill (dangling references, misplaced games, rating drift) on every visit. A **QR code** of the current address lets phones open the
+  club without typing.
+- **Member code** – optional single shared code for the whole club (Admin → Member code), like a Wi-Fi password. Five wrong
+  codes (or admin passwords, or PINs) in a row lock that secret for ten minutes.
   When set, visitors see a join screen once and the device is remembered for 90 days; changing the code signs everyone
   out, turning it off reopens the club. Admins pass regardless. Meant for a public deployment; leave it off on the
   office network.
@@ -92,6 +101,10 @@ Concurrency: writes are versioned, so two people entering results at the same mo
 - `data/db.json` is the whole club (local mode). Copy it anywhere for a backup, or use **Admin → Download**, which works
   in both storage modes.
 - One snapshot per day is written to `data/backups/` (the newest 30 files are kept, including the copies taken before an
-  import or restore). Restore from the Admin page.
+  import, restore or reset and the ones you save by hand on the Admin page). Download, restore or delete them from the
+  Admin page.
 - Set `CHESS_DATA_DIR=/some/folder` to run against a different data folder (e.g. a second club or a test copy).
-- Forgot the admin password? Remove the `adminPasswordHash` field from `data/db.json` and set a new one.
+- Forgot the admin password? Set `ADMIN_RESET_TOKEN` to a long random string in the server environment (Vercel:
+  Settings → Environment Variables, then redeploy; locally `.env.local`), open `/admin` → *Forgot the password?*, choose admin or
+  owner password, enter the token and a new password, then remove the variable again. Locally you can also delete the `adminPasswordHash`
+  field from `data/db.json`.

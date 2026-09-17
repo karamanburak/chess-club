@@ -17,6 +17,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
   const { t } = await getT();
   const club = (await readDb()).settings.club;
   const wrong = sp.error === "wrong";
+  const locked = sp.error === "locked";
 
   return (
     <main className="min-h-full flex-1 flex items-center justify-center p-6 board-texture">
@@ -35,6 +36,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
           </label>
           <input id="code" name="code" type="text" required autoFocus autoComplete="off" autoCapitalize="characters" className="w-full text-center font-mono text-lg tracking-widest" placeholder={t.me.join.placeholder} />
           {wrong && <p className="text-sm text-loss">{t.me.join.wrongCode}</p>}
+          {locked && <p className="text-sm text-loss">{t.me.join.lockedCode}</p>}
           <SubmitButton pendingText={t.me.join.checking}>{t.me.join.enter}</SubmitButton>
           <p className="text-xs text-muted">{t.me.join.remembered}</p>
         </form>

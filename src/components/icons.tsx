@@ -14,7 +14,7 @@ export function KnightMark({ className = "", ...rest }: SVGProps<SVGSVGElement>)
   );
 }
 
-export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv" | "settings";
+export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv" | "settings" | "more";
 
 /** Small line icons, all on the same 24px grid and stroke, so the header reads as one family. */
 export function Icon({ name, className = "h-4 w-4", ...rest }: { name: IconName } & SVGProps<SVGSVGElement>) {
@@ -25,6 +25,14 @@ export function Icon({ name, className = "h-4 w-4", ...rest }: { name: IconName 
         <svg {...common}>
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+      );
+    case "more":
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="12" r="1.2" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+          <circle cx="19" cy="12" r="1.2" fill="currentColor" />
         </svg>
       );
     case "tv":

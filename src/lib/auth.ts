@@ -3,7 +3,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { mutate, readDb } from "./db";
 import { UserError } from "./errors";
-import { ADMIN_COOKIE, ADMIN_DAYS, bindFor, createToken, ME_COOKIE, ME_DAYS, MEMBER_COOKIE, MEMBER_DAYS, verifyToken } from "./tokens";
+import { ADMIN_COOKIE, ADMIN_DAYS, bindFor, createToken, isAdminToken, ME_COOKIE, ME_DAYS, MEMBER_COOKIE, MEMBER_DAYS, verifyToken } from "./tokens";
 
 export { ADMIN_COOKIE as SESSION_COOKIE };
 
@@ -34,19 +34,23 @@ export async function adminConfigured(): Promise<boolean> {
   return !!(await readDb()).settings.adminPasswordHash;
 }
 
+/** Signed in as admin: a valid token bound to the current password hash. Changing the password signs every admin device out. */
 export async function isAdmin(): Promise<boolean> {
   const jar = await cookies();
-  const token = verifyToken(jar.get(ADMIN_COOKIE)?.value, await getSecret());
-  return token?.role === "admin";
+  const db = await readDb();
+  return isAdminToken(jar.get(ADMIN_COOKIE)?.value, await getSecret(), db.settings.adminPasswordHash);
 }
 
 export async function requireAdmin(): Promise<void> {
   if (!(await isAdmin())) throw new UserError("Admin sign-in required for this action.");
 }
 
+/** Issues the admin cookie for the current password. Call it again right after a password change, so this device stays signed in. */
 export async function setSessionCookie(): Promise<void> {
   const jar = await cookies();
-  jar.set(ADMIN_COOKIE, createToken({ role: "admin", exp: Date.now() + ADMIN_DAYS * 86400_000 }, await getSecret()), {
+  const hash = (await readDb()).settings.adminPasswordHash;
+  if (!hash) throw new Error("No admin password configured.");
+  jar.set(ADMIN_COOKIE, createToken({ role: "admin", exp: Date.now() + ADMIN_DAYS * 86400_000, bind: bindFor(hash) }, await getSecret()), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -57,6 +61,17 @@ export async function setSessionCookie(): Promise<void> {
 export async function clearSessionCookie(): Promise<void> {
   const jar = await cookies();
   jar.delete(ADMIN_COOKIE);
+}
+
+/**
+ * Replaces the signing secret. Every cookie ever issued (admin, member, "this is me") stops
+ * verifying at once; each device signs in again. Returns the new secret.
+ */
+export async function rotateSessionSecret(): Promise<string> {
+  return mutate((d) => {
+    d.settings.sessionSecret = randomBytes(32).toString("hex");
+    return d.settings.sessionSecret;
+  });
 }
 
 /* ------------------------------------------------------------------ */

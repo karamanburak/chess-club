@@ -935,115 +935,120 @@ function RoundTable({
     else if (ko.gamesPerMatch > 1) parts.push(fmt(msg.tournaments.game.gameN, { n: idx + 1 }));
     return parts.length ? parts.join(" · ") : null;
   };
+  const rows = round.pairings.map((p) => {
+    const g = games.get(p.gameId);
+    const res = g?.result ?? null;
+    return {
+      p,
+      g,
+      res,
+      whiteWon: res === "1-0" || res === "+/-",
+      blackWon: res === "0-1" || res === "-/+",
+      wn: names.get(p.whiteId)?.name ?? "?",
+      bn: names.get(p.blackId)?.name ?? "?",
+      mine: !!me && (p.whiteId === me || p.blackId === me),
+      label: gameLabel(p.gameId),
+    };
+  });
+  const result = (r: (typeof rows)[number]) =>
+    r.g ? (
+      finished ? (
+        <span className="font-mono">{resultLabel(r.g.result)}</span>
+      ) : admin || r.mine ? (
+        <ResultButtons gameId={r.g.id} current={r.g.result} names={{ white: r.wn, black: r.bn }} allowSwap />
+      ) : (
+        <span className="font-mono" title={msg.common.onlyOwnBoard}>{resultLabel(r.g.result)}</span>
+      )
+    ) : (
+      <span className="text-loss text-xs">{msg.tournaments.game.missing}</span>
+    );
+  const side = (r: (typeof rows)[number], color: "white" | "black") => {
+    const id = color === "white" ? r.p.whiteId : r.p.blackId;
+    const won = color === "white" ? r.whiteWon : r.blackWon;
+    const lost = color === "white" ? r.blackWon : r.whiteWon;
+    return (
+      <span className={`flex items-center gap-2 min-w-0 ${lost ? "text-muted" : ""} ${won ? "font-semibold" : ""}`}>
+        <ColorDot color={color} />
+        <PlayerLink id={id} name={color === "white" ? r.wn : r.bn} rating={(color === "white" ? r.g?.whiteRatingBefore : r.g?.blackRatingBefore) ?? names.get(id)?.rating} />
+        <RatingDelta before={(color === "white" ? r.g?.whiteRatingBefore : r.g?.blackRatingBefore) ?? null} after={(color === "white" ? r.g?.whiteRatingAfter : r.g?.blackRatingAfter) ?? null} />
+      </span>
+    );
+  };
+  const byeName = round.byePlayerId ? names.get(round.byePlayerId)?.name ?? "?" : null;
+
   return (
-    <div className="scroll-x">
-      <table className="table">
-        <thead>
-          <tr>
-            <th className="w-16">{msg.common.board}</th>
-            <th>⚪ {msg.common.white}</th>
-            <th>⚫ {msg.common.black}</th>
-            <th className="w-52">{msg.common.result}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {round.pairings.map((p) => {
-            const g = games.get(p.gameId);
-            const res = g?.result ?? null;
-            const whiteWon = res === "1-0" || res === "+/-";
-            const blackWon = res === "0-1" || res === "-/+";
-            const wn = names.get(p.whiteId)?.name ?? "?";
-            const bn = names.get(p.blackId)?.name ?? "?";
-            const mine = !!me && (p.whiteId === me || p.blackId === me);
-            return (
-              <tr key={p.gameId} className={`${res ? "" : "bg-accent/[0.03]"} ${mine ? "bg-accent/10" : ""}`}>
-                <td className="font-mono text-muted">
-                  {p.board}
-                  {mine && (
-                    <span className="block text-[10px] uppercase tracking-wider text-accent font-sans">{msg.common.you}</span>
-                  )}
-                  {gameLabel(p.gameId) && (
-                    <span className="block text-[10px] uppercase tracking-wider text-accent font-sans whitespace-nowrap">
-                      {gameLabel(p.gameId)}
-                    </span>
-                  )}
-                </td>
-                <td>
-                  <span
-                    className={`flex items-center gap-2 ${blackWon ? "text-muted" : ""} ${whiteWon ? "font-semibold" : ""}`}
-                  >
-                    <ColorDot color="white" />
-                    <PlayerLink
-                      id={p.whiteId}
-                      name={wn}
-                      rating={
-                        g?.whiteRatingBefore ?? names.get(p.whiteId)?.rating
-                      }
-                    />
-                    <RatingDelta
-                      before={g?.whiteRatingBefore ?? null}
-                      after={g?.whiteRatingAfter ?? null}
-                    />
-                  </span>
-                </td>
-                <td>
-                  <span
-                    className={`flex items-center gap-2 ${whiteWon ? "text-muted" : ""} ${blackWon ? "font-semibold" : ""}`}
-                  >
-                    <ColorDot color="black" />
-                    <PlayerLink
-                      id={p.blackId}
-                      name={bn}
-                      rating={
-                        g?.blackRatingBefore ?? names.get(p.blackId)?.rating
-                      }
-                    />
-                    <RatingDelta
-                      before={g?.blackRatingBefore ?? null}
-                      after={g?.blackRatingAfter ?? null}
-                    />
-                  </span>
-                </td>
-                <td>
-                  {g ? (
-                    finished ? (
-                      <span className="font-mono">{resultLabel(g.result)}</span>
-                    ) : admin || mine ? (
-                      <ResultButtons
-                        gameId={g.id}
-                        current={g.result}
-                        names={{ white: wn, black: bn }}
-                        allowSwap
-                      />
-                    ) : (
-                      <span className="font-mono" title={msg.common.onlyOwnBoard}>{resultLabel(g.result)}</span>
-                    )
-                  ) : (
-                    <span className="text-loss text-xs">{msg.tournaments.game.missing}</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-          {round.byePlayerId && (
+    <>
+      {/* Phone: one card per board, result controls on their own full-width row. */}
+      <ul className="md:hidden divide-y divide-line/60">
+        {rows.map((r) => (
+          <li key={r.p.gameId} className={`px-4 py-3 flex flex-col gap-2 ${r.mine ? "bg-accent/10" : r.res ? "" : "bg-accent/[0.03]"}`}>
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted">
+              <span className="font-mono">
+                {msg.common.board} {r.p.board}
+                {r.label && <span className="ml-2 text-accent font-sans">{r.label}</span>}
+              </span>
+              {r.mine && <span className="text-accent font-sans">{msg.common.you}</span>}
+            </div>
+            <div className="flex flex-col gap-1.5 text-sm">
+              {side(r, "white")}
+              {side(r, "black")}
+            </div>
+            <div className="pt-1 [&_[role=group]]:flex [&_[role=group]]:w-full [&_[role=group]_button]:flex-1">{result(r)}</div>
+          </li>
+        ))}
+        {round.byePlayerId && (
+          <li className="px-4 py-3 flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <span className="h-3 w-3" />
+              <PlayerLink id={round.byePlayerId} name={byeName ?? "?"} />
+              <span className="text-muted text-xs">{msg.common.bye}</span>
+            </span>
+            <span className="font-mono text-muted text-xs">{msg.tournaments.game.freePoint}</span>
+          </li>
+        )}
+      </ul>
+
+      {/* Desktop: the classic four-column table. */}
+      <div className="hidden md:block scroll-x">
+        <table className="table">
+          <thead>
             <tr>
-              <td className="font-mono text-muted">–</td>
-              <td colSpan={2}>
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3" />
-                  <PlayerLink
-                    id={round.byePlayerId}
-                    name={names.get(round.byePlayerId)?.name ?? "?"}
-                  />
-                  <span className="text-muted text-xs">{msg.common.bye}</span>
-                </span>
-              </td>
-              <td className="font-mono text-muted text-xs">{msg.tournaments.game.freePoint}</td>
+              <th className="w-16">{msg.common.board}</th>
+              <th>⚪ {msg.common.white}</th>
+              <th>⚫ {msg.common.black}</th>
+              <th className="w-52">{msg.common.result}</th>
             </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.p.gameId} className={`${r.res ? "" : "bg-accent/[0.03]"} ${r.mine ? "bg-accent/10" : ""}`}>
+                <td className="font-mono text-muted">
+                  {r.p.board}
+                  {r.mine && <span className="block text-[10px] uppercase tracking-wider text-accent font-sans">{msg.common.you}</span>}
+                  {r.label && <span className="block text-[10px] uppercase tracking-wider text-accent font-sans whitespace-nowrap">{r.label}</span>}
+                </td>
+                <td>{side(r, "white")}</td>
+                <td>{side(r, "black")}</td>
+                <td>{result(r)}</td>
+              </tr>
+            ))}
+            {round.byePlayerId && (
+              <tr>
+                <td className="font-mono text-muted">–</td>
+                <td colSpan={2}>
+                  <span className="flex items-center gap-2">
+                    <span className="h-3 w-3" />
+                    <PlayerLink id={round.byePlayerId} name={byeName ?? "?"} />
+                    <span className="text-muted text-xs">{msg.common.bye}</span>
+                  </span>
+                </td>
+                <td className="font-mono text-muted text-xs">{msg.tournaments.game.freePoint}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

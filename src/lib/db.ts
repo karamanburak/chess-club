@@ -119,8 +119,24 @@ interface Storage {
   save(db: Database, expectedVersion: number): Promise<boolean>;
   listBackups(): Promise<BackupInfo[]>;
   readBackup(file: string): Promise<Database | null>;
-  /** Copies the current state aside under `db-<label>-<timestamp>.json`. */
-  snapshot(label: string): Promise<void>;
+  /** Copies the current state aside under `db-<label>-<timestamp>.json`. Returns the file name. */
+  snapshot(label: string): Promise<string | null>;
+  deleteBackup(file: string): Promise<boolean>;
+}
+
+/** Snapshot files: `db-<label>-<stamp>.json`. Restore, download and delete accept nothing else. */
+export const BACKUP_NAME_RE = /^db-[\w-]+\.json$/;
+
+/** Turns a free-text label into something that fits the file name: letters, digits and dashes, at most 40 chars. */
+export function snapshotLabel(raw: string, fallback = "manual"): string {
+  const s = raw
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  return s || fallback;
 }
 
 function todayName(): string {
@@ -193,9 +209,17 @@ const fileStorage: Storage = {
     return migrate(JSON.parse(fs.readFileSync(src, "utf8")));
   },
   async snapshot(label) {
-    if (!fs.existsSync(DB_PATH)) return;
+    if (!fs.existsSync(DB_PATH)) return null;
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    fs.copyFileSync(DB_PATH, path.join(BACKUP_DIR, stampedName(label)));
+    const name = stampedName(label);
+    fs.copyFileSync(DB_PATH, path.join(BACKUP_DIR, name));
+    return name;
+  },
+  async deleteBackup(file) {
+    const target = path.join(BACKUP_DIR, file);
+    if (!fs.existsSync(target)) return false;
+    fs.unlinkSync(target);
+    return true;
   },
 };
 
@@ -251,7 +275,14 @@ const postgresStorage: Storage = {
   },
   async snapshot(label) {
     const q = await sql();
-    await q`INSERT INTO club_snapshots (name, data) SELECT ${stampedName(label)}, data FROM club_state WHERE id = 1`;
+    const name = stampedName(label);
+    const rows = (await q`INSERT INTO club_snapshots (name, data) SELECT ${name}, data FROM club_state WHERE id = 1 RETURNING name`) as unknown[];
+    return rows.length ? name : null;
+  },
+  async deleteBackup(file) {
+    const q = await sql();
+    const rows = (await q`DELETE FROM club_snapshots WHERE name = ${file} RETURNING name`) as unknown[];
+    return rows.length > 0;
   },
 };
 
@@ -304,6 +335,16 @@ export function listBackups(): Promise<BackupInfo[]> {
 
 export function readBackup(file: string): Promise<Database | null> {
   return storage.readBackup(file);
+}
+
+/** Saves the current state as a named snapshot without changing anything. Waits for pending writes first. */
+export async function takeSnapshot(label: string): Promise<string | null> {
+  await chain;
+  return storage.snapshot(label);
+}
+
+export function deleteBackup(file: string): Promise<boolean> {
+  return storage.deleteBackup(file);
 }
 
 export function newId(): string {

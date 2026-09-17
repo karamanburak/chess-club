@@ -112,18 +112,19 @@ export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string;
   const { t } = useT();
   const links = buildLinks(t.nav);
   return (
+    <>
     <header className="border-b border-line bg-bg/85 backdrop-blur sticky top-0 z-20 no-print">
       <div className="mx-auto max-w-6xl px-4 h-16 flex items-center gap-4">
         <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent text-accent-fg shadow-[inset_0_-2px_0_rgba(0,0,0,.18)] group-hover:brightness-110 transition">
             <KnightMark className="h-7 w-7" />
           </span>
-          <span className="hidden md:block leading-tight">
-            <span className="block font-display font-semibold text-[17px] tracking-tight max-w-44 truncate">{clubName}</span>
+          <span className="block leading-tight">
+            <span className="block font-display font-semibold text-[17px] tracking-tight max-w-36 sm:max-w-44 truncate">{clubName}</span>
             {!/chess\s*club|schach/i.test(clubName) && <span className="block text-[10px] uppercase tracking-[0.18em] text-muted">{t.nav.chessClub}</span>}
           </span>
         </Link>
-        <nav className="flex items-center gap-0.5 text-sm h-full">
+        <nav className="hidden md:flex items-center gap-0.5 text-sm h-full">
           {links.map((l) => {
             if (l.menu) return <MenuItem key={l.href} link={l} path={path} menuLabel={fmt(t.nav.menu, { name: l.label })} />;
             const active = isActive(path, l);
@@ -151,11 +152,108 @@ export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string;
           {admin && (
             <Link href="/admin" className={`badge py-1 ${path.startsWith("/admin") ? "border-accent/60 text-accent" : "border-win/40 text-win"}`} title={t.nav.adminHint}>
               <Icon name="shield" className="h-3 w-3" />
-              {t.nav.admin}
+              <span className="hidden sm:inline">{t.nav.admin}</span>
             </Link>
           )}
         </div>
       </div>
     </header>
+    {/* Outside the header: its backdrop-filter would otherwise become the containing block of the fixed bar. */}
+    <MobileTabs links={links} path={path} admin={admin} />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Phone: bottom tab bar with the four places people go on a club night, */
+/* plus a "More" sheet for the rest.                                     */
+/* ------------------------------------------------------------------ */
+
+function MobileTabs({ links, path, admin }: { links: NavLink[]; path: string; admin: boolean }) {
+  const { t } = useT();
+  // Same trick as MenuItem: the sheet remembers the path it opened on, so any navigation closes it.
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const open = openOn === path;
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpenOn(null);
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
+  type Entry = { href: string; label: string; icon: IconName };
+  const flat: Entry[] = links.flatMap((l): Entry[] => (l.menu ? l.menu : [l]));
+  const byHref = (href: string): Entry => flat.find((l) => l.href === href)!;
+  const tabs = [byHref("/"), byHref("/tournaments"), byHref("/pairing"), byHref("/players")];
+  const more = [byHref("/games"), byHref("/stats"), byHref("/hall-of-fame")];
+  const moreActive = more.some((m) => path.startsWith(m.href)) || path.startsWith("/admin");
+  const tabActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+
+  const tabClass = (active: boolean) =>
+    `relative flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium leading-none transition-colors ${active ? "text-fg" : "text-muted"}`;
+  const bar = <span className="absolute top-0 h-0.5 w-8 rounded-full bg-accent" />;
+
+  return (
+    <>
+      <nav aria-label={t.nav.mobileNav} className="md:hidden fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/92 backdrop-blur pb-[env(safe-area-inset-bottom)] no-print">
+        <div className="flex items-stretch h-14">
+          {tabs.map((l) => {
+            const active = tabActive(l.href) && !open;
+            return (
+              <Link key={l.href} href={l.href} className={tabClass(active)} aria-current={active ? "page" : undefined}>
+                {active && bar}
+                <Icon name={l.icon} className={`h-5 w-5 ${active ? "text-accent" : ""}`} />
+                <span className="truncate max-w-full px-1">{l.label}</span>
+              </Link>
+            );
+          })}
+          <button type="button" onClick={() => setOpenOn(open ? null : path)} className={tabClass(moreActive || open)} aria-expanded={open} aria-haspopup="dialog">
+            {moreActive && !open && bar}
+            <Icon name="more" className={`h-5 w-5 ${moreActive || open ? "text-accent" : ""}`} />
+            <span>{t.nav.more}</span>
+          </button>
+        </div>
+      </nav>
+      {open && (
+        <div className="md:hidden fixed inset-0 z-40" role="dialog" aria-label={t.nav.more}>
+          <button type="button" aria-label={t.common.close} onClick={() => setOpenOn(null)} className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-line bg-panel p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-2xl sheet-up">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+            <div className="grid grid-cols-3 gap-2">
+              {more.map((m) => {
+                const here = path.startsWith(m.href);
+                return (
+                  <Link key={m.href} href={m.href} className={`flex flex-col items-center gap-2 rounded-2xl border px-2 py-4 text-center transition-colors ${here ? "border-accent/50 bg-accent/5" : "border-line bg-panel-2 hover:bg-panel-3"}`}>
+                    <span className={`grid h-10 w-10 place-items-center rounded-xl border border-line bg-panel ${here ? "text-accent" : "text-muted"}`}>
+                      <Icon name={m.icon} className="h-5 w-5" />
+                    </span>
+                    <span className="text-sm font-medium leading-tight">{m.label}</span>
+                  </Link>
+                );
+              })}
+              {admin && (
+                <Link href="/admin" className={`flex flex-col items-center gap-2 rounded-2xl border px-2 py-4 text-center transition-colors ${path.startsWith("/admin") ? "border-accent/50 bg-accent/5" : "border-win/30 bg-panel-2 hover:bg-panel-3"}`}>
+                  <span className={`grid h-10 w-10 place-items-center rounded-xl border border-line bg-panel ${path.startsWith("/admin") ? "text-accent" : "text-win"}`}>
+                    <Icon name="shield" className="h-5 w-5" />
+                  </span>
+                  <span className="text-sm font-medium leading-tight">{t.nav.admin}</span>
+                </Link>
+              )}
+              <Link href="/tv" className="flex flex-col items-center gap-2 rounded-2xl border border-line bg-panel-2 px-2 py-4 text-center transition-colors hover:bg-panel-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-panel text-muted">
+                  <Icon name="tv" className="h-5 w-5" />
+                </span>
+                <span className="text-sm font-medium leading-tight">{t.nav.tvScreen}</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

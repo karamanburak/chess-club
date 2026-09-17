@@ -196,6 +196,17 @@ body {
     transform: none;
   }
 }
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.sheet-up {
+  animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
 .fade-up {
   animation: fade-up 0.25s ease-out both;
 }

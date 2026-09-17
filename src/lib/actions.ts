@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { migrate, mutate, newId, readBackup, readDb, replaceDb } from "./db";
+import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot } from "./db";
+import { mergeCheck, mergePlayers as mergeRecords, type MergeProblem } from "./merge";
 import { RESULTS, recomputeRatings } from "./elo";
 import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
@@ -21,12 +22,15 @@ import {
   standings,
   TIEBREAK_PRESETS,
 } from "./queries";
-import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, hashPassword, isAdmin, requireAdmin, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
+import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, hashPassword, isAdmin, requireAdmin, rotateSessionSecret, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
+import { timingSafeEqual } from "node:crypto";
 import { UserError } from "./errors";
 import { makeGame } from "./games";
 import { generateKnockoutRound, syncKnockout } from "./knockout";
 import { isAvatar, randomAvatar } from "./avatar";
+import { clearFails, isLocked, LOCK_MAX_FAILS, LOCK_MINUTES, registerFail } from "./lockout";
 import { clearPinFails, PIN_RE, pinLocked, registerPinFail } from "./pin";
+import { applyReset, isResetScope, type ResetScope } from "./reset";
 import { SKIP_COOKIE, SKIP_DAYS } from "./tokens";
 import { fmt, isLang, LANG_COOKIE, type Dict, type Lang } from "./i18n";
 import { getT } from "./lang";
@@ -63,7 +67,7 @@ function revalidateAll() {
 /* Action plumbing: user-facing errors, activity log                   */
 /* ------------------------------------------------------------------ */
 
-const actor = new AsyncLocalStorage<{ admin: boolean }>();
+const actor = new AsyncLocalStorage<{ admin: boolean; owner?: boolean }>();
 
 /** Builds the URL of the page the request came from, with the message attached as a flash toast. */
 function flashUrl(referer: string | null, message: string): string {
@@ -114,8 +118,45 @@ const LOG_KEEP = 500;
 
 /** Appends a line to the activity log. Must be called inside the mutate() that persists the change. */
 function log(db: Database, text: string): void {
-  db.activity.push({ id: newId(), at: new Date().toISOString(), admin: actor.getStore()?.admin ?? false, text });
+  const who = actor.getStore();
+  db.activity.push({ id: newId(), at: new Date().toISOString(), admin: who?.admin ?? false, text: who?.owner ? `${text} [owner]` : text });
   if (db.activity.length > LOG_KEEP) db.activity.splice(0, db.activity.length - LOG_KEEP);
+}
+
+/** Who is acting: the admin may edit any game, a claimed device only its own boards. */
+async function whoActs(): Promise<{ admin: boolean; me: string | null }> {
+  return { admin: await isAdmin(), me: await currentPlayerId() };
+}
+
+/**
+ * The owner password gates the destructive admin tools. While none is set, being admin is enough
+ * (the first-run state); once set, the action must carry it as the "owner" form field or as a
+ * trailing string argument (ConfirmButton asks for it). Wrong tries share the lockout rules.
+ */
+async function requireOwner(source: FormData | string | undefined): Promise<void> {
+  await requireAdmin();
+  const { settings } = await readDb();
+  const hash = settings.ownerPasswordHash;
+  if (!hash) return;
+  const E = await msgs();
+  if (isLocked(settings.ownerLock)) throw new UserError(E.ownerLocked);
+  const pw = typeof source === "string" ? source.trim() : source instanceof FormData ? str(source, "owner") : "";
+  if (!pw) throw new UserError(E.ownerRequired);
+  if (!verifyPassword(pw, hash)) {
+    const locked = await mutate((db) => {
+      registerFail((db.settings.ownerLock ??= {}));
+      if (isLocked(db.settings.ownerLock)) log(db, `Owner password locked for ${LOCK_MINUTES} minutes after ${LOCK_MAX_FAILS} wrong tries`);
+      return isLocked(db.settings.ownerLock);
+    });
+    throw new UserError(locked ? E.ownerLocked : E.ownerWrong);
+  }
+  if (settings.ownerLock) await mutate((db) => delete db.settings.ownerLock);
+  const store = actor.getStore();
+  if (store) store.owner = true;
+}
+
+function mayEditGame(who: { admin: boolean; me: string | null }, g: Pick<Game, "whiteId" | "blackId">): boolean {
+  return who.admin || (!!who.me && (g.whiteId === who.me || g.blackId === who.me));
 }
 
 function nameOf(db: Database, id: string): string {
@@ -181,10 +222,22 @@ export async function setupAdmin(fd: FormData) {
 
 export async function login(fd: FormData) {
   return run(async () => {
-    const hash = (await readDb()).settings.adminPasswordHash;
-    if (!hash || !verifyPassword(str(fd, "password"), hash)) redirect("/admin?error=wrong");
+    const { settings } = await readDb();
+    if (isLocked(settings.adminLock)) redirect("/admin?error=locked");
+    if (!settings.adminPasswordHash || !verifyPassword(str(fd, "password"), settings.adminPasswordHash)) {
+      const locked = await mutate((db) => {
+        registerFail((db.settings.adminLock ??= {}));
+        if (isLocked(db.settings.adminLock)) log(db, `Admin sign-in locked for ${LOCK_MINUTES} minutes after ${LOCK_MAX_FAILS} wrong passwords`);
+        return isLocked(db.settings.adminLock);
+      });
+      redirect(locked ? "/admin?error=locked" : "/admin?error=wrong");
+    }
     await setSessionCookie();
-    await mutate((db) => log(db, "Admin signed in"));
+    await mutate((db) => {
+      clearFails(db.settings.adminLock);
+      delete db.settings.adminLock;
+      log(db, "Admin signed in");
+    });
     revalidateAll();
     redirect(str(fd, "next") || "/admin");
   });
@@ -200,7 +253,7 @@ export async function logout() {
 
 export async function changePassword(fd: FormData) {
   return run(async () => {
-    await requireAdmin();
+    await requireOwner(fd);
     const hash = (await readDb()).settings.adminPasswordHash;
     if (!hash || !verifyPassword(str(fd, "current"), hash)) redirect("/admin?error=wrong");
     const pw = str(fd, "password");
@@ -210,7 +263,77 @@ export async function changePassword(fd: FormData) {
       db.settings.adminPasswordHash = hashPassword(pw);
       log(db, "Admin password changed");
     });
+    // Admin cookies are bound to the password hash: every other admin device is now signed out; this one gets a fresh cookie.
+    await setSessionCookie();
     redirect("/admin?ok=changed");
+  });
+}
+
+/**
+ * Sets or changes the owner password. The first one may be set by any admin (there is nothing to
+ * protect it with yet); afterwards the current owner password is required, never the admin one.
+ */
+export async function setOwnerPassword(fd: FormData) {
+  return run(async () => {
+    await requireAdmin();
+    const { settings } = await readDb();
+    if (settings.ownerPasswordHash) await requireOwner(str(fd, "current"));
+    const pw = str(fd, "password");
+    if (pw.length < 6) redirect("/admin?error=ownershort");
+    if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
+    const first = !settings.ownerPasswordHash;
+    await mutate((db) => {
+      db.settings.ownerPasswordHash = hashPassword(pw);
+      delete db.settings.ownerLock;
+      log(db, first ? "Owner password set: destructive admin tools now require it" : "Owner password changed");
+    });
+    revalidateAll();
+    redirect(first ? "/admin?ok=ownerset" : "/admin?ok=ownerchanged");
+  });
+}
+
+/**
+ * Forgotten admin or owner password. Only available when the server has ADMIN_RESET_TOKEN in its environment
+ * (Vercel → Settings → Environment Variables, or .env.local). The token is compared in constant time;
+ * remove it again once the password is set.
+ */
+export async function resetAdminPassword(fd: FormData) {
+  return run(async () => {
+    const expected = process.env.ADMIN_RESET_TOKEN?.trim();
+    if (!expected) redirect("/admin?error=noreset");
+    const given = Buffer.from(str(fd, "token"));
+    const want = Buffer.from(expected);
+    if (given.length !== want.length || !timingSafeEqual(given, want)) redirect("/admin?error=badtoken");
+    const which = str(fd, "which") === "owner" ? "owner" : "admin";
+    const pw = str(fd, "password");
+    if (pw.length < (which === "owner" ? 6 : 4)) redirect(which === "owner" ? "/admin?error=ownershort" : "/admin?error=short");
+    if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
+    await mutate((db) => {
+      if (which === "owner") {
+        db.settings.ownerPasswordHash = hashPassword(pw);
+        delete db.settings.ownerLock;
+        log(db, "Owner password reset with the recovery token");
+      } else {
+        db.settings.adminPasswordHash = hashPassword(pw);
+        delete db.settings.adminLock;
+        log(db, "Admin password reset with the recovery token");
+      }
+    });
+    if (which === "admin") await setSessionCookie();
+    revalidateAll();
+    redirect(which === "owner" ? "/admin?ok=recoveredowner" : "/admin?ok=recovered");
+  });
+}
+
+/** Rotates the signing secret: every admin, member and "this is me" cookie on every device stops working, this one included. */
+export async function signOutEverywhere(owner?: string) {
+  return run(async () => {
+    await requireOwner(owner);
+    await rotateSessionSecret();
+    await mutate((db) => log(db, "All devices signed out (session secret rotated)"));
+    await clearSessionCookie();
+    revalidateAll();
+    redirect("/admin?ok=everyoneout");
   });
 }
 
@@ -233,7 +356,7 @@ export async function updateSettings(fd: FormData) {
 /** Replaces the database with an uploaded JSON file. The current state is kept as a snapshot first. */
 export async function importDatabase(fd: FormData) {
   return run(async () => {
-    await requireAdmin();
+    await requireOwner(fd);
     const file = fd.get("file");
     if (!(file instanceof File) || file.size === 0) redirect("/admin?error=nofile");
     let parsed: unknown;
@@ -246,8 +369,9 @@ export async function importDatabase(fd: FormData) {
     if (!obj || !Array.isArray(obj.players) || !Array.isArray(obj.games)) redirect("/admin?error=badjson");
     const current = await readDb();
     const next = migrate(obj);
-    // Keep the admin credentials of this installation.
+    // Keep the credentials of this installation.
     next.settings.adminPasswordHash = current.settings.adminPasswordHash;
+    next.settings.ownerPasswordHash = current.settings.ownerPasswordHash;
     next.settings.sessionSecret = current.settings.sessionSecret;
     recomputeRatings(next);
     log(next, `Database imported from "${file.name}" (${next.players.length} players, ${next.games.length} games)`);
@@ -257,21 +381,107 @@ export async function importDatabase(fd: FormData) {
   });
 }
 
-export async function restoreBackup(file: string) {
+/** Saves the current state as a named snapshot (`db-<label>-<time>.json`), e.g. before a tournament night. */
+export async function createSnapshot(fd: FormData) {
   return run(async () => {
     await requireAdmin();
+    const label = snapshotLabel(str(fd, "label"));
+    const name = await takeSnapshot(label);
+    if (!name) throw new UserError((await msgs()).snapshotFailed);
+    await mutate((db) => log(db, `Snapshot ${name} taken`));
+    revalidateAll();
+    redirect("/admin?ok=snapshot");
+  });
+}
+
+export async function removeBackup(file: string, owner?: string) {
+  return run(async () => {
+    await requireOwner(owner);
     const E = await msgs();
-    if (!/^db-[\w-]+\.json$/.test(file)) throw new UserError(E.invalidBackupName);
+    if (!BACKUP_NAME_RE.test(file)) throw new UserError(E.invalidBackupName);
+    if (!(await deleteBackup(file))) throw new UserError(E.backupNotFound);
+    await mutate((db) => log(db, `Snapshot ${file} deleted`));
+    revalidateAll();
+  });
+}
+
+export async function restoreBackup(file: string, owner?: string) {
+  return run(async () => {
+    await requireOwner(owner);
+    const E = await msgs();
+    if (!BACKUP_NAME_RE.test(file)) throw new UserError(E.invalidBackupName);
     const next = await readBackup(file);
     if (!next) throw new UserError(E.backupNotFound);
     const current = await readDb();
     next.settings.adminPasswordHash = current.settings.adminPasswordHash;
+    next.settings.ownerPasswordHash = current.settings.ownerPasswordHash;
     next.settings.sessionSecret = current.settings.sessionSecret;
     recomputeRatings(next);
     log(next, `Snapshot ${file} restored`);
     await replaceDb(next, "before-restore");
     revalidateAll();
     redirect("/admin?ok=restored");
+  });
+}
+
+const MERGE_ERRORS: Record<MergeProblem, keyof Msgs> = {
+  same: "mergeSamePlayer",
+  notFound: "playerNotFound",
+  playedEachOther: "mergePlayedEachOther",
+  sharedTournament: "mergeSharedTournament",
+  sharedSession: "mergeSharedSession",
+};
+
+/**
+ * Two records for one person: every game, pairing, bye, seed and championship of `from` moves to
+ * `into`, then `from` is deleted. Ratings are replayed. Refused when the two ever met on a board or
+ * in the same tournament or club night, because that cannot be one person.
+ */
+export async function mergePlayers(fd: FormData) {
+  return run(async () => {
+    await requireOwner(fd);
+    const E = await msgs();
+    const fromId = str(fd, "fromId");
+    const intoId = str(fd, "intoId");
+    if (!fromId || !intoId) throw new UserError(E.mergeChooseBoth);
+    await mutate((db) => {
+      const problem = mergeCheck(db, fromId, intoId);
+      if (problem) throw new UserError(E[MERGE_ERRORS[problem]]);
+      const fromName = nameOf(db, fromId);
+      const intoName = nameOf(db, intoId);
+      const moved = mergeRecords(db, fromId, intoId);
+      for (const t of db.tournaments) if (t.knockout) syncKnockout(db, t);
+      recomputeRatings(db);
+      log(db, `Player ${fromName} merged into ${intoName} (${moved.games} games, ${moved.tournaments} tournaments, ${moved.sessions} club nights moved)`);
+    });
+    revalidateAll();
+    redirect("/admin?ok=merged");
+  });
+}
+
+const RESET_LOG: Record<ResetScope, string> = {
+  everything: "Club reset: all players, games, tournaments, club nights and seasons deleted",
+  history: "History reset: all games, tournaments, club nights and seasons deleted, players kept",
+  tournaments: "All tournaments deleted",
+  sessions: "All club nights deleted",
+  friendlies: "All friendly games deleted",
+};
+
+/**
+ * Danger zone: bulk delete. The current state is kept as a labeled snapshot first
+ * (`db-before-reset-<scope>-<time>.json`), so a slip can be undone from the backup list.
+ */
+export async function resetData(scope: ResetScope, owner?: string) {
+  return run(async () => {
+    await requireOwner(owner);
+    if (!isResetScope(scope)) throw new UserError((await msgs()).unknownResetScope);
+    const next = structuredClone(await readDb());
+    const removed = applyReset(next, scope);
+    recomputeRatings(next);
+    log(next, `${RESET_LOG[scope]} (${removed.players} players, ${removed.games} games, ${removed.tournaments} tournaments, ${removed.sessions} club nights)`);
+    await replaceDb(next, `before-reset-${scope}`);
+    revalidateAll();
+    redirect(`/admin?ok=reset-${scope}`);
   });
 }
 
@@ -301,7 +511,7 @@ export async function updateClub(fd: FormData) {
 /** Sets or changes the club-wide member code. Every member is asked for the new one once. */
 export async function setMemberCode(fd: FormData) {
   return run(async () => {
-    await requireAdmin();
+    await requireOwner(fd);
     const code = str(fd, "code");
     if (code.length < 4) redirect("/admin?error=codeshort");
     if (code !== str(fd, "confirm")) redirect("/admin?error=codemismatch");
@@ -315,9 +525,9 @@ export async function setMemberCode(fd: FormData) {
 }
 
 /** Turns the door code off: the club is open to anyone who knows the address again. */
-export async function clearMemberCode() {
+export async function clearMemberCode(owner?: string) {
   return run(async () => {
-    await requireAdmin();
+    await requireOwner(owner);
     await mutate((db) => {
       delete db.settings.memberCodeHash;
       log(db, "Member code turned off");
@@ -334,7 +544,17 @@ export async function joinClub(fd: FormData) {
     const hash = db.settings.memberCodeHash;
     const next = str(fd, "next").startsWith("/") ? str(fd, "next") : "/";
     if (!hash) redirect(next);
-    if (!verifyPassword(str(fd, "code"), hash)) redirect(`/join?error=wrong&next=${encodeURIComponent(next)}`);
+    const back = (error: string) => `/join?error=${error}&next=${encodeURIComponent(next)}`;
+    if (isLocked(db.settings.memberLock)) redirect(back("locked"));
+    if (!verifyPassword(str(fd, "code"), hash)) {
+      const locked = await mutate((d) => {
+        registerFail((d.settings.memberLock ??= {}));
+        if (isLocked(d.settings.memberLock)) log(d, `Member code locked for ${LOCK_MINUTES} minutes after ${LOCK_MAX_FAILS} wrong codes`);
+        return isLocked(d.settings.memberLock);
+      });
+      redirect(back(locked ? "locked" : "wrong"));
+    }
+    if (db.settings.memberLock) await mutate((d) => delete d.settings.memberLock);
     await setMemberCookie(hash);
     revalidateAll();
     redirect(next);
@@ -684,6 +904,8 @@ export async function recordFriendlyGame(fd: FormData) {
     const blackId = str(fd, "blackId");
     const result = parseResult(str(fd, "result"), E);
     if (!whiteId || !blackId || whiteId === blackId) return;
+    const who = await whoActs();
+    if (!mayEditGame(who, { whiteId, blackId })) throw new UserError(who.me ? E.friendlyNotYours : E.claimFirst);
     await mutate((db) => {
       const g = makeGame(db, { whiteId, blackId, rated: fd.get("rated") !== "off", tournamentId: null, round: null, board: null, sessionId: null });
       g.result = result;
@@ -701,10 +923,12 @@ export async function recordFriendlyGame(fd: FormData) {
 export async function setGameResult(gameId: string, result: GameResult | null) {
   return attempt(async () => {
     const E = await msgs();
+    const who = await whoActs();
     if (result !== null) parseResult(result, E);
     await mutate((db) => {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
+      if (!mayEditGame(who, g)) throw new UserError(who.me ? E.notYourGame : E.claimFirst);
       const t = g.tournamentId ? db.tournaments.find((x) => x.id === g.tournamentId) : undefined;
       if (t?.knockout && g.round !== null && g.round < t.rounds.length) {
         throw new UserError(E.knockoutRoundLocked);
@@ -722,9 +946,11 @@ export async function setGameResult(gameId: string, result: GameResult | null) {
 export async function swapColors(gameId: string) {
   return attempt(async () => {
     const E = await msgs();
+    const who = await whoActs();
     await mutate((db) => {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
+      if (!mayEditGame(who, g)) throw new UserError(who.me ? E.notYourGame : E.claimFirst);
       if (g.result) throw new UserError(E.clearResultBeforeSwap);
       [g.whiteId, g.blackId] = [g.blackId, g.whiteId];
       log(db, `${whereOf(db, g)}: colors swapped, ${nameOf(db, g.whiteId)} now white against ${nameOf(db, g.blackId)}`);

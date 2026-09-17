@@ -2,9 +2,11 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Signed, stateless session cookies. Two roles share one secret:
- * "admin" (password) and "member" (the club-wide member code). A member
- * token is bound to the code it was issued for, so changing the code signs
- * everyone out at once. Pure Node crypto: usable from proxy.ts and actions.
+ * "admin" (password) and "member" (the club-wide member code). Both tokens are
+ * bound to the hash they were issued for, so a new member code signs every member
+ * out and a new admin password signs every admin device out. Rotating the secret
+ * itself signs everyone out, the "this is me" devices included.
+ * Pure Node crypto: usable from proxy.ts and actions.
  */
 export const ADMIN_COOKIE = "cc_admin";
 export const MEMBER_COOKIE = "cc_member";
@@ -21,7 +23,7 @@ export interface TokenPayload {
   role: "admin" | "member" | "self";
   exp: number;
   nonce: string;
-  /** For members: fingerprint of the code hash the token was issued for. */
+  /** Members: fingerprint of the code hash the token was issued for. Admins: fingerprint of the password hash. */
   bind?: string;
   /** For "self": the claimed player. */
   playerId?: string;
@@ -58,11 +60,17 @@ export function verifyToken(token: string | undefined, secret: string | undefine
   }
 }
 
+/** A valid admin token for the current password. No password configured means no admin. */
+export function isAdminToken(token: string | undefined, secret: string | undefined, adminPasswordHash: string | undefined): boolean {
+  if (!adminPasswordHash) return false;
+  const t = verifyToken(token, secret);
+  return !!t && t.role === "admin" && t.bind === bindFor(adminPasswordHash);
+}
+
 /** True when the cookies grant access to the club: a valid member token for the current code, or an admin. */
-export function hasClubAccess(cookies: { admin?: string; member?: string }, secret: string | undefined, memberCodeHash: string | undefined): boolean {
+export function hasClubAccess(cookies: { admin?: string; member?: string }, secret: string | undefined, memberCodeHash: string | undefined, adminPasswordHash?: string): boolean {
   if (!memberCodeHash) return true;
-  const admin = verifyToken(cookies.admin, secret);
-  if (admin?.role === "admin") return true;
+  if (isAdminToken(cookies.admin, secret, adminPasswordHash)) return true;
   const member = verifyToken(cookies.member, secret);
   return !!member && member.role === "member" && member.bind === bindFor(memberCodeHash);
 }

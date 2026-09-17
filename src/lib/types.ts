@@ -149,9 +149,15 @@ export interface Settings {
   /** Club default UI language; a device can override it with the cc_lang cookie. */
   language?: "en" | "de";
   adminPasswordHash?: string;
+  /** Second, rarer password that gates the destructive admin tools (danger zone, import/restore, member code, passwords). Unset = admin suffices. */
+  ownerPasswordHash?: string;
   /** Club-wide member code (scrypt hash). Unset = no code asked, open club. */
   memberCodeHash?: string;
   sessionSecret?: string;
+  /** Brute-force brakes for the admin password and the member code (see src/lib/lockout.ts). */
+  adminLock?: { fails?: number; lockedUntil?: string | null };
+  memberLock?: { fails?: number; lockedUntil?: string | null };
+  ownerLock?: { fails?: number; lockedUntil?: string | null };
 }
 
 /** One line in the activity log: what changed and whether the admin did it. */
