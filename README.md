@@ -62,7 +62,7 @@ Wi-Fi use `bun run dev:lan`; the Admin page shows the addresses and a QR code.
 
 | Tournament, live | Club night |
 |---|---|
-| ![Running Swiss tournament with round boards and standings](docs/screenshots/tournament.jpg) | ![Club night: tick who is present and start](docs/screenshots/club-night.jpg) |
+| ![Running Swiss tournament with round boards and standings](docs/screenshots/tournament.jpg) | ![A finished club night: two rounds of boards and the results of the night](docs/screenshots/club-night.jpg) |
 
 | Player profile | Hall of Fame |
 |---|---|
