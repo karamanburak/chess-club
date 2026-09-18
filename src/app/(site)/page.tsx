@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
+import { isToday, pendingFor, upcoming } from "@/lib/challenges";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
 import { currentSeason, daysUntil, highlights, seasonOverdue, titleFor } from "@/lib/club";
@@ -38,7 +39,10 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const hl = highlights(db, 14, t.club.highlights);
   const me = await currentPlayerId();
   const admin = await isAdmin();
+  const member = admin || !!me;
   const overdue = season && admin ? seasonOverdue(season) : null;
+  const agreed = upcoming(db).slice(0, 5);
+  const waiting = me ? pendingFor(db, me).length : 0;
 
   return (
     <>
@@ -62,10 +66,10 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           </div>
           <div className="flex flex-wrap gap-2 shrink-0 sm:justify-end">
             <Link href="/pairing" className="btn btn-primary">
-              <Icon name="pawn" className="h-4 w-4" /> {night ? t.home.backToNight : t.home.startNight}
+              <Icon name="pawn" className="h-4 w-4" /> {night ? t.home.backToNight : member ? t.home.startNight : t.common.clubNight}
             </Link>
             <Link href="/tournaments" className="btn">
-              {t.home.newTournament}
+              {member ? t.home.newTournament : t.home.tournaments}
             </Link>
             <Link href="/tv" target="_blank" className="btn btn-ghost" title={t.common.tvHint} aria-label={t.common.tv}>
               <Icon name="tv" className="h-4 w-4" />
@@ -205,6 +209,28 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </Section>
 
         <div className="col-stack">
+          {(agreed.length > 0 || waiting > 0) && (
+            <Section title={t.challenges.upcomingAll} right={<Link href="/challenges" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
+              <div className="flex flex-col gap-2 text-sm">
+                {waiting > 0 && (
+                  <Link href="/challenges" className="rounded-xl border border-accent/50 bg-accent/10 px-3 py-2 text-accent font-medium hover:bg-accent/15">
+                    {fmt(t.challenges.badge, { n: waiting })} →
+                  </Link>
+                )}
+                {agreed.map((c) => (
+                  <div key={c.id} className={`flex items-center gap-3 ${isToday(c.at) ? "text-fg" : ""}`}>
+                    <span className="text-xs text-muted font-mono whitespace-nowrap w-28">{formatDateTime(c.at, lang)}</span>
+                    <span className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <PlayerLink id={c.fromId} name={names.get(c.fromId)?.name ?? "?"} avatar />
+                      <span className="text-muted">–</span>
+                      <PlayerLink id={c.toId} name={names.get(c.toId)?.name ?? "?"} avatar />
+                    </span>
+                    {isToday(c.at) && <span className="badge border-accent/50 text-accent">{t.challenges.today}</span>}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
           {hl.length > 0 && (
             <Section title={t.home.aroundTheClub} right={<Link href="/hall-of-fame" className="btn btn-sm btn-ghost">{t.home.hallOfFame}</Link>}>
               <ul className="flex flex-col gap-3 -my-1">

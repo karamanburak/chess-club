@@ -30,6 +30,7 @@ function emptyDb(): Database {
     tournaments: [],
     sessions: [],
     seasons: [],
+    challenges: [],
     activity: [],
     settings: { startRating: 1200, byePoints: 1, defaultTiebreaks: DEFAULT_TIEBREAKS, club: { ...DEFAULT_CLUB } },
   };
@@ -58,6 +59,8 @@ export function migrate(raw: any): Database {
   db.sessions ??= [];
   db.activity ??= [];
   db.seasons ??= [];
+  db.challenges ??= [];
+  for (const c of db.challenges) c.whiteId ??= null;
   // Every club lives in a season. The first one opens at the first game (or today) and is named after that year.
   if (db.seasons.length === 0) {
     const first = db.games

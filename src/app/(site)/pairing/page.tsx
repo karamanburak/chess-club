@@ -14,6 +14,7 @@ import { Avatar, ColorDot, Empty, PageHeader, Pill, PlayerLink, Rank, RatingDelt
 import type { Game, Player, SessionRound } from "@/lib/types";
 import { RoundList } from "@/components/RoundList";
 import { PairingReveal, type Seat } from "@/components/PairingReveal";
+import { GuestNotice } from "@/components/GuestNotice";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
   const db = await readDb();
   const admin = await isAdmin();
   const me = await currentPlayerId();
+  const member = admin || !!me;
   const players = leaderboard(db);
   const names = playerMap(db);
   const colors = colorStats(db);
@@ -37,6 +39,8 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
           <Section title={t.pairing.whoIsHere} right={<span className="text-xs text-muted">{plural(players.length, t.pairing.activePlayers)}</span>}>
             {players.length < 2 ? (
               <p className="text-sm text-muted">{t.pairing.needTwo}</p>
+            ) : !member ? (
+              <GuestNotice />
             ) : (
               <form action={sessionStart} className="flex flex-col gap-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[26rem] overflow-y-auto pr-1">
@@ -143,14 +147,18 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
         }
         actions={
           <>
-            <form action={sessionNextRound.bind(null, session.id)}>
-              <SubmitButton className="btn btn-primary" pendingText={t.common.pairing} disabled={!complete || session.presentIds.length < 2} title={!complete ? t.pairing.finishBoardsFirst : undefined}>
-                <Icon name="shuffle" className="h-4 w-4" /> {fmt(t.pairing.pairRound, { n: (round?.number ?? 0) + 1 })}
-              </SubmitButton>
-            </form>
-            <ConfirmButton action={sessionClose.bind(null, session.id)} className="btn" confirmLabel={t.pairing.closeNight}>
-              <Icon name="flag" className="h-4 w-4" /> {t.pairing.closeNight}
-            </ConfirmButton>
+            {member && (
+              <form action={sessionNextRound.bind(null, session.id)}>
+                <SubmitButton className="btn btn-primary" pendingText={t.common.pairing} disabled={!complete || session.presentIds.length < 2} title={!complete ? t.pairing.finishBoardsFirst : undefined}>
+                  <Icon name="shuffle" className="h-4 w-4" /> {fmt(t.pairing.pairRound, { n: (round?.number ?? 0) + 1 })}
+                </SubmitButton>
+              </form>
+            )}
+            {member && (
+              <ConfirmButton action={sessionClose.bind(null, session.id)} className="btn" confirmLabel={t.pairing.closeNight}>
+                <Icon name="flag" className="h-4 w-4" /> {t.pairing.closeNight}
+              </ConfirmButton>
+            )}
             <Link href="/tv" target="_blank" className="btn" title={t.common.tvHint}>
               <Icon name="tv" className="h-4 w-4" /> {t.common.tv}
             </Link>
@@ -159,14 +167,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
       />
 
       <AutoRefresh seconds={10} />
-      {!me && !admin && round && !reveal && (
-        <Link href="/me" className="card mb-4 border-line bg-panel-2/40 flex items-center gap-3 text-sm hover:border-accent/60 transition-colors no-print">
-          <Icon name="users" className="h-5 w-5 text-accent shrink-0" />
-          <span>
-            {t.common.claimToEnter} <span className="text-accent font-medium">{t.common.whoAreYou} →</span>
-          </span>
-        </Link>
-      )}
+      {!member && round && !reveal && <GuestNotice className="mb-4" />}
       {(myBoard || myBye) && !reveal && (
         <div className="card mb-4 border-accent/50 bg-accent/5 flex items-center gap-3 no-print">
           <Avatar id={me!} name={names.get(me!)?.name ?? "?"} size="md" />
@@ -195,7 +196,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
                   {done}/{total}
                 </span>
                 <span className="flex items-center gap-2">
-                  {!roundHasResults(db, round) && (
+                  {member && !roundHasResults(db, round) && (
                     <form action={sessionRepair.bind(null, session.id)}>
                       <SubmitButton className="btn btn-sm" pendingText="…">
                         <Icon name="refresh" className="h-3.5 w-3.5" /> {t.pairing.repair}
@@ -232,7 +233,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
                   </div>
                 </PairingReveal>
               </div>
-              {complete && (
+              {member && complete && (
                 <div className="card bg-panel-2/40 flex items-center justify-between gap-3 no-print">
                   <span className="text-sm text-muted">{t.pairing.allFinished}</span>
                   <form action={sessionNextRound.bind(null, session.id)}>
@@ -297,7 +298,7 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
                         {r.ratingChange}
                       </td>
                       <td className="text-right no-print">
-                        {session.presentIds.includes(r.playerId) && (
+                        {member && session.presentIds.includes(r.playerId) && (
                           <form action={sessionRemovePlayer.bind(null, session.id, r.playerId)}>
                             <SubmitButton className="btn btn-sm btn-ghost text-muted" title={t.pairing.leftEarly}>
                               ↪
@@ -314,6 +315,8 @@ export default async function PairingPage({ searchParams }: PageProps<"/pairing"
           <Section title={t.pairing.lateArrival}>
             {absent.length === 0 ? (
               <p className="text-sm text-muted">{t.pairing.everyoneHere}</p>
+            ) : !member ? (
+              <p className="text-sm text-muted">{t.common.onlyMembers}</p>
             ) : (
               <form action={sessionAddPlayer.bind(null, session.id)} className="flex gap-2">
                 <select name="playerId" className="flex-1">

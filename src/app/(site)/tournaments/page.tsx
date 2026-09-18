@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
+import { isMemberDevice } from "@/lib/auth";
+import { GuestNotice } from "@/components/GuestNotice";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
 import { createTournament } from "@/lib/actions";
@@ -14,6 +16,7 @@ const MODE_KEYS = ["random", "swiss", "roundrobin", "knockout"] as const;
 export default async function TournamentsPage() {
   const { t: msg, lang } = await getT();
   const db = await readDb();
+  const member = await isMemberDevice();
   const list = [...db.tournaments].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const players = leaderboard(db);
   const suggestedRounds = Math.max(3, Math.min(7, Math.ceil(Math.log2(Math.max(players.length, 2))) + 1));
@@ -69,6 +72,11 @@ export default async function TournamentsPage() {
           )}
         </div>
 
+        {!member ? (
+          <div className="col-stack">
+            <GuestNotice />
+          </div>
+        ) : (
         <Section title={msg.tournaments.newTournament}>
           <form action={createTournament} className="flex flex-col gap-4">
             <div>
@@ -168,6 +176,7 @@ export default async function TournamentsPage() {
             <SubmitButton pendingText={msg.tournaments.form.creating}>{msg.tournaments.form.create}</SubmitButton>
           </form>
         </Section>
+        )}
       </div>
     </>
   );

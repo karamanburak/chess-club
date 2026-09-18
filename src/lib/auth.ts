@@ -41,6 +41,11 @@ export async function isAdmin(): Promise<boolean> {
   return isAdminToken(jar.get(ADMIN_COOKIE)?.value, await getSecret(), db.settings.adminPasswordHash);
 }
 
+/** Admin or a device that claimed a player: may organise club nights, tournaments and rounds. Guests only browse. */
+export async function isMemberDevice(): Promise<boolean> {
+  return (await isAdmin()) || !!(await currentPlayerId());
+}
+
 export async function requireAdmin(): Promise<void> {
   if (!(await isAdmin())) throw new UserError("Admin sign-in required for this action.");
 }

@@ -160,6 +160,32 @@ export interface Settings {
   ownerLock?: { fails?: number; lockedUntil?: string | null };
 }
 
+export type ChallengeStatus = "pending" | "accepted" | "declined" | "played" | "cancelled" | "expired";
+
+/**
+ * A game two members agreed to play: one proposes a date, the other accepts, declines or proposes
+ * another time. Once played, the result becomes a friendly game (`gameId`).
+ */
+export interface Challenge {
+  id: string;
+  /** Who issued the challenge. */
+  fromId: string;
+  toId: string;
+  /** ISO datetime the game is proposed for. */
+  at: string;
+  place: string;
+  timeControl: string;
+  note: string;
+  status: ChallengeStatus;
+  /** Who made the current proposal; only the other side can accept it. */
+  proposedBy: string;
+  /** Drawn at random when the challenge is accepted; null until then. The other player has black. */
+  whiteId: string | null;
+  gameId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** One line in the activity log: what changed and whether the admin did it. */
 export interface ActivityEntry {
   id: string;
@@ -176,6 +202,7 @@ export interface Database {
   tournaments: Tournament[];
   sessions: ClubSession[];
   seasons: Season[];
+  challenges: Challenge[];
   activity: ActivityEntry[];
   settings: Settings;
 }

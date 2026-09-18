@@ -107,7 +107,7 @@ function MenuItem({ link, path, menuLabel }: { link: NavLink; path: string; menu
   );
 }
 
-export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string; me: { id: string; name: string; avatar: string } | null }) {
+export function Nav({ admin, clubName, me, waiting = 0 }: { admin: boolean; clubName: string; me: { id: string; name: string; avatar: string } | null; waiting?: number }) {
   const path = usePathname();
   const { t } = useT();
   const links = buildLinks(t.nav);
@@ -138,6 +138,16 @@ export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string;
           })}
         </nav>
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          {(me || admin) && (
+            <Link href="/challenges" className={`relative btn btn-sm btn-ghost ${path.startsWith("/challenges") ? "bg-panel-2 text-fg" : ""}`} title={t.nav.challengesHint} aria-label={t.nav.challenges}>
+              <Icon name="swords" className="h-4 w-4" />
+              {waiting > 0 && (
+                <span className="absolute -top-1 -right-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-fg" aria-label={fmt(t.challenges.badge, { n: waiting })}>
+                  {waiting}
+                </span>
+              )}
+            </Link>
+          )}
           {me ? (
             <Link href={`/players/${me.id}`} className="flex items-center gap-2 rounded-full border border-line pl-0.5 pr-3 py-0.5 hover:border-accent/60 transition-colors" title={t.nav.yourProfile}>
               <FaceSvg seed={me.avatar} title={me.name} className="h-7 w-7 rounded-full" />
@@ -159,7 +169,7 @@ export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string;
       </div>
     </header>
     {/* Outside the header: its backdrop-filter would otherwise become the containing block of the fixed bar. */}
-    <MobileTabs links={links} path={path} admin={admin} />
+    <MobileTabs links={links} path={path} admin={admin} member={!!me || admin} waiting={waiting} />
     </>
   );
 }
@@ -169,7 +179,7 @@ export function Nav({ admin, clubName, me }: { admin: boolean; clubName: string;
 /* plus a "More" sheet for the rest.                                     */
 /* ------------------------------------------------------------------ */
 
-function MobileTabs({ links, path, admin }: { links: NavLink[]; path: string; admin: boolean }) {
+function MobileTabs({ links, path, admin, member, waiting }: { links: NavLink[]; path: string; admin: boolean; member: boolean; waiting: number }) {
   const { t } = useT();
   // Same trick as MenuItem: the sheet remembers the path it opened on, so any navigation closes it.
   const [openOn, setOpenOn] = useState<string | null>(null);
@@ -190,7 +200,8 @@ function MobileTabs({ links, path, admin }: { links: NavLink[]; path: string; ad
   const flat: Entry[] = links.flatMap((l): Entry[] => (l.menu ? l.menu : [l]));
   const byHref = (href: string): Entry => flat.find((l) => l.href === href)!;
   const tabs = [byHref("/"), byHref("/tournaments"), byHref("/pairing"), byHref("/players")];
-  const more = [byHref("/games"), byHref("/stats"), byHref("/hall-of-fame")];
+  const more: Entry[] = [byHref("/games"), byHref("/stats"), byHref("/hall-of-fame")];
+  if (member) more.unshift({ href: "/challenges", label: t.nav.challenges, icon: "swords" });
   const moreActive = more.some((m) => path.startsWith(m.href)) || path.startsWith("/admin");
   const tabActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
 
@@ -214,7 +225,10 @@ function MobileTabs({ links, path, admin }: { links: NavLink[]; path: string; ad
           })}
           <button type="button" onClick={() => setOpenOn(open ? null : path)} className={tabClass(moreActive || open)} aria-expanded={open} aria-haspopup="dialog">
             {moreActive && !open && bar}
-            <Icon name="more" className={`h-5 w-5 ${moreActive || open ? "text-accent" : ""}`} />
+            <span className="relative">
+              <Icon name="more" className={`h-5 w-5 ${moreActive || open ? "text-accent" : ""}`} />
+              {waiting > 0 && <span className="absolute -top-1.5 -right-2 h-2.5 w-2.5 rounded-full bg-accent" />}
+            </span>
             <span>{t.nav.more}</span>
           </button>
         </div>

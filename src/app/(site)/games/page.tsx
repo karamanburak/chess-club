@@ -43,6 +43,34 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
     return s ? `/games?${s}` : "/games";
   };
 
+  /** What both layouts need per game: names, who won, and the event cell. */
+  const row = (g: (typeof games)[number]) => {
+    const tr = g.tournamentId ? tournaments.get(g.tournamentId) : null;
+    return {
+      tr,
+      ww: g.result === "1-0" || g.result === "+/-",
+      bw: g.result === "0-1" || g.result === "-/+",
+      wn: names.get(g.whiteId)?.name ?? "?",
+      bn: names.get(g.blackId)?.name ?? "?",
+      event: (
+        <>
+          {tr ? (
+            <Link href={`/tournaments/${tr.id}`} className="hover:text-accent">
+              {tr.name} · {fmt(t.games.roundShort, { n: g.round })}
+            </Link>
+          ) : g.sessionId ? (
+            <Link href={`/pairing/${g.sessionId}`} className="hover:text-accent">
+              {t.common.clubNight}
+            </Link>
+          ) : (
+            t.games.friendly
+          )}
+          {!g.rated && <span className="ml-1 badge border-muted/40">{t.common.unrated}</span>}
+        </>
+      ),
+    };
+  };
+
   return (
     <>
       <PageHeader
@@ -83,68 +111,89 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
         {games.length === 0 ? (
           <Empty icon="list" title={t.games.noGames}>{t.games.noMatch}</Empty>
         ) : (
-          <div className="scroll-x">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t.games.date}</th>
-                  <th className="text-right">⚪ {t.common.white}</th>
-                  <th className="text-center">{t.common.result}</th>
-                  <th>⚫ {t.common.black}</th>
-                  <th className="hidden sm:table-cell">{t.games.event}</th>
-                  {admin && <th></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {games.map((g) => {
-                  const tr = g.tournamentId ? tournaments.get(g.tournamentId) : null;
-                  const ww = g.result === "1-0" || g.result === "+/-";
-                  const bw = g.result === "0-1" || g.result === "-/+";
-                  return (
-                    <tr key={g.id} className="hover:bg-panel-2/50">
-                      <td className="text-muted text-xs whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
-                      <td className={`text-right nowrap ${ww ? "font-semibold" : bw ? "text-muted" : ""}`}>
-                        <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} className="mr-2" />
-                        <PlayerLink id={g.whiteId} name={names.get(g.whiteId)?.name ?? "?"} />
-                        <span className="text-xs text-muted font-mono ml-1.5">{g.whiteRatingBefore}</span>
-                      </td>
-                      <td className="text-center">
-                        <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
-                      </td>
-                      <td className={`nowrap ${bw ? "font-semibold" : ww ? "text-muted" : ""}`}>
-                        <span className="text-xs text-muted font-mono mr-1.5">{g.blackRatingBefore}</span>
-                        <PlayerLink id={g.blackId} name={names.get(g.blackId)?.name ?? "?"} />
-                        <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-2" />
-                      </td>
-                      <td className="text-xs text-muted hidden sm:table-cell">
-                        {tr ? (
-                          <Link href={`/tournaments/${tr.id}`} className="hover:text-accent">
-                            {tr.name} · {fmt(t.games.roundShort, { n: g.round })}
-                          </Link>
-                        ) : g.sessionId ? (
-                          <Link href={`/pairing/${g.sessionId}`} className="hover:text-accent">
-                            {t.common.clubNight}
-                          </Link>
-                        ) : (
-                          t.games.friendly
-                        )}
-                        {!g.rated && <span className="ml-1 badge border-muted/40">{t.common.unrated}</span>}
-                      </td>
-                      {admin && (
-                        <td className="text-right">
-                          {!tr && (
-                            <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel={t.common.delete}>
-                              {t.common.delete}
-                            </ConfirmButton>
-                          )}
+          <>
+            {/* Phone: one card per game, no horizontal scrolling. */}
+            <ul className="sm:hidden divide-y divide-line/60">
+              {games.map((g) => {
+                const r = row(g);
+                return (
+                  <li key={g.id} className="px-4 py-3 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted">
+                      <span className="whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
+                      <span className="truncate">{r.event}</span>
+                    </div>
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
+                      <span className={`flex items-center justify-end gap-1.5 min-w-0 text-right ${r.ww ? "font-semibold" : r.bw ? "text-muted" : ""}`}>
+                        <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} />
+                        <PlayerLink id={g.whiteId} name={r.wn} className="truncate" />
+                      </span>
+                      <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
+                      <span className={`flex items-center gap-1.5 min-w-0 ${r.bw ? "font-semibold" : r.ww ? "text-muted" : ""}`}>
+                        <PlayerLink id={g.blackId} name={r.bn} className="truncate" />
+                        <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} />
+                      </span>
+                    </div>
+                    {admin && !r.tr && (
+                      <div className="flex justify-end">
+                        <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel={t.common.delete}>
+                          {t.common.delete}
+                        </ConfirmButton>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* Tablet and up: the table. */}
+            <div className="hidden sm:block scroll-x">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t.games.date}</th>
+                    <th className="text-right">⚪ {t.common.white}</th>
+                    <th className="text-center">{t.common.result}</th>
+                    <th>⚫ {t.common.black}</th>
+                    <th>{t.games.event}</th>
+                    {admin && <th></th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {games.map((g) => {
+                    const r = row(g);
+                    return (
+                      <tr key={g.id} className="hover:bg-panel-2/50">
+                        <td className="text-muted text-xs whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
+                        <td className={`text-right nowrap ${r.ww ? "font-semibold" : r.bw ? "text-muted" : ""}`}>
+                          <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} className="mr-2" />
+                          <PlayerLink id={g.whiteId} name={r.wn} />
+                          <span className="text-xs text-muted font-mono ml-1.5">{g.whiteRatingBefore}</span>
                         </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <td className="text-center">
+                          <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
+                        </td>
+                        <td className={`nowrap ${r.bw ? "font-semibold" : r.ww ? "text-muted" : ""}`}>
+                          <span className="text-xs text-muted font-mono mr-1.5">{g.blackRatingBefore}</span>
+                          <PlayerLink id={g.blackId} name={r.bn} />
+                          <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-2" />
+                        </td>
+                        <td className="text-xs text-muted">{r.event}</td>
+                        {admin && (
+                          <td className="text-right">
+                            {!r.tr && (
+                              <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel={t.common.delete}>
+                                {t.common.delete}
+                              </ConfirmButton>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         {pages > 1 && (
           <div className="px-5 py-3 border-t border-line flex justify-end">

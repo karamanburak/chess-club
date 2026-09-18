@@ -10,6 +10,7 @@
  * - The language is a per-device cookie (`cc_lang`), falling back to `settings.language` (club default), then English.
  */
 import { admin } from "./messages/admin";
+import { challenges } from "./messages/challenges";
 import { club } from "./messages/club";
 import { common } from "./messages/common";
 import { errors } from "./messages/errors";
@@ -46,6 +47,7 @@ function build(lang: Lang) {
     errors: errors[lang],
     club: club[lang],
     tv: tv[lang],
+    challenges: challenges[lang],
   };
 }
 

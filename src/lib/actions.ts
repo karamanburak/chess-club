@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot } from "./db";
 import { mergeCheck, mergePlayers as mergeRecords, type MergeProblem } from "./merge";
+import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireChallenges, involves, type ChallengeProblem } from "./challenges";
 import { RESULTS, recomputeRatings } from "./elo";
 import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
@@ -126,6 +127,15 @@ function log(db: Database, text: string): void {
 /** Who is acting: the admin may edit any game, a claimed device only its own boards. */
 async function whoActs(): Promise<{ admin: boolean; me: string | null }> {
   return { admin: await isAdmin(), me: await currentPlayerId() };
+}
+
+/**
+ * Organising the club (club nights, tournaments, rounds, participants) is for members: a device that
+ * claimed a player, or the admin. A guest browsing the address can look but not touch.
+ */
+async function requireMember(): Promise<void> {
+  const who = await whoActs();
+  if (!who.admin && !who.me) throw new UserError((await msgs()).membersOnly);
 }
 
 /**
@@ -894,6 +904,163 @@ export async function deletePlayer(id: string) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Challenges: two members agree on a game                             */
+/* ------------------------------------------------------------------ */
+
+const CHALLENGE_ERRORS: Record<ChallengeProblem, keyof Msgs> = {
+  self: "challengeSelf",
+  notFound: "playerNotFound",
+  inactive: "challengeInactive",
+  past: "challengePast",
+  exists: "challengeExists",
+};
+
+/** The acting player for challenge actions: the claimed device, or for the admin the `as` field / the challenger. */
+async function challengeActor(fallback?: string | null): Promise<{ admin: boolean; me: string | null }> {
+  const who = await whoActs();
+  if (!who.admin && !who.me) throw new UserError((await msgs()).membersOnly);
+  return { admin: who.admin, me: who.me ?? fallback ?? null };
+}
+
+export async function createChallenge(fd: FormData) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor(str(fd, "fromId") || null);
+    const fromId = who.admin && str(fd, "fromId") ? str(fd, "fromId") : who.me;
+    const toId = str(fd, "toId");
+    if (!fromId) throw new UserError(E.membersOnly);
+    const at = combineDateTime(str(fd, "date"), str(fd, "time"));
+    if (!at) throw new UserError(E.challengePast);
+    await mutate((db) => {
+      expireChallenges(db);
+      const problem = challengeCheck(db, fromId, toId, at);
+      if (problem) throw new UserError(E[CHALLENGE_ERRORS[problem]]);
+      const now = new Date().toISOString();
+      db.challenges.push({
+        id: newId(),
+        fromId,
+        toId,
+        at,
+        place: str(fd, "place").slice(0, 80),
+        timeControl: str(fd, "timeControl").slice(0, 20),
+        note: str(fd, "note").slice(0, 200),
+        status: "pending",
+        proposedBy: fromId,
+        whiteId: null,
+        gameId: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${at.slice(0, 16).replace("T", " ")}`);
+    });
+    revalidateAll();
+  });
+}
+
+function findChallenge(db: Database, id: string, E: Msgs) {
+  const c = db.challenges.find((x) => x.id === id);
+  if (!c) throw new UserError(E.challengeNotFound);
+  return c;
+}
+
+/** Accept or decline the current proposal. Only the side that did not make it may answer. */
+export async function answerChallenge(id: string, answer: "accept" | "decline") {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor();
+    await mutate((db) => {
+      expireChallenges(db);
+      const c = findChallenge(db, id, E);
+      if (effectiveStatus(c) !== "pending") throw new UserError(E.challengeNotOpen);
+      if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      if (!who.admin && who.me === c.proposedBy) throw new UserError(E.challengeNotYourTurn);
+      c.status = answer === "accept" ? "accepted" : "declined";
+      // Colours are drawn the moment both agree, so neither side gets to choose.
+      c.whiteId = c.status === "accepted" ? drawColors(c).whiteId : null;
+      c.updatedAt = new Date().toISOString();
+      log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} ${c.status}${c.whiteId ? `, ${nameOf(db, c.whiteId)} has white` : ""}`);
+    });
+    revalidateAll();
+  });
+}
+
+/** Either side proposes a different time; the ball passes to the other side. */
+export async function proposeChallengeTime(id: string, fd: FormData) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor();
+    const at = combineDateTime(str(fd, "date"), str(fd, "time"));
+    if (!at || new Date(at).getTime() < Date.now()) throw new UserError(E.challengePast);
+    await mutate((db) => {
+      expireChallenges(db);
+      const c = findChallenge(db, id, E);
+      if (!["pending", "accepted"].includes(effectiveStatus(c))) throw new UserError(E.challengeNotOpen);
+      if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      c.at = at;
+      if (str(fd, "place") || fd.has("place")) c.place = str(fd, "place").slice(0, 80);
+      if (fd.has("timeControl")) c.timeControl = str(fd, "timeControl").slice(0, 20);
+      c.status = "pending";
+      c.whiteId = null;
+      c.proposedBy = who.me && involves(c, who.me) ? who.me : c.fromId;
+      c.updatedAt = new Date().toISOString();
+      log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}: new time ${at.slice(0, 16).replace("T", " ")} proposed by ${nameOf(db, c.proposedBy)}`);
+    });
+    revalidateAll();
+  });
+}
+
+export async function cancelChallenge(id: string) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor();
+    await mutate((db) => {
+      expireChallenges(db);
+      const c = findChallenge(db, id, E);
+      if (!["pending", "accepted"].includes(effectiveStatus(c))) throw new UserError(E.challengeNotOpen);
+      if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      c.status = "cancelled";
+      c.updatedAt = new Date().toISOString();
+      log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} withdrawn`);
+    });
+    revalidateAll();
+  });
+}
+
+/** The agreed game was played: record it as a friendly game and close the challenge. */
+export async function recordChallengeResult(id: string, fd: FormData) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor();
+    const result = parseResult(str(fd, "result"), E);
+    await mutate((db) => {
+      expireChallenges(db);
+      const c = findChallenge(db, id, E);
+      const status = effectiveStatus(c);
+      // A challenge may be recorded once agreed; an accepted one that slipped past its day still counts if both agree it was played.
+      if (status !== "accepted" && !(c.status === "accepted" && status === "expired")) throw new UserError(E.challengeNotAccepted);
+      if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      // Colours were drawn at acceptance; older records without one get the draw now.
+      c.whiteId ??= drawColors(c).whiteId;
+      const whiteId = c.whiteId;
+      const blackId = whiteId === c.fromId ? c.toId : c.fromId;
+      const g = makeGame(db, { whiteId, blackId, rated: fd.get("rated") !== "off", tournamentId: null, round: null, board: null, sessionId: null });
+      g.result = result;
+      // Stamp the game at the agreed time when that is in the past, otherwise now.
+      const when = new Date(c.at).getTime() < Date.now() ? c.at : new Date().toISOString();
+      g.createdAt = when;
+      g.completedAt = when;
+      db.games.push(g);
+      c.status = "played";
+      c.gameId = g.id;
+      c.updatedAt = new Date().toISOString();
+      log(db, `Challenge played: ${nameOf(db, whiteId)} – ${nameOf(db, blackId)} ${resultLabel(result)}`);
+      recomputeRatings(db);
+    });
+    revalidateAll();
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* Games                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -988,6 +1155,7 @@ export async function deleteGame(gameId: string) {
 
 export async function createTournament(fd: FormData) {
   return run(async () => {
+    await requireMember();
     const name = str(fd, "name");
     if (!name) return;
     const mode = parseMode(str(fd, "pairingMode"));
@@ -1067,6 +1235,7 @@ export async function updateTournament(id: string, fd: FormData) {
 
 export async function setParticipants(id: string, fd: FormData) {
   return run(async () => {
+    await requireMember();
     const E = await msgs();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
@@ -1097,6 +1266,7 @@ export async function setParticipants(id: string, fd: FormData) {
 /** A withdrawn player keeps their results but is skipped in future pairings. */
 export async function toggleWithdraw(id: string, playerId: string) {
   return run(async () => {
+    await requireMember();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
@@ -1114,6 +1284,7 @@ export async function toggleWithdraw(id: string, playerId: string) {
 
 export async function generateNextRound(id: string) {
   return run(async () => {
+    await requireMember();
     const E = await msgs();
     const round = await mutate((db): number | undefined => {
       const t = db.tournaments.find((x) => x.id === id);
@@ -1197,6 +1368,7 @@ export async function generateNextRound(id: string) {
 /** Manually rewrite the boards of a round that has no results yet. */
 export async function updateRoundPairings(id: string, roundNumber: number, fd: FormData) {
   return run(async () => {
+    await requireMember();
     const E = await msgs();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
@@ -1263,6 +1435,7 @@ export async function deleteLastRound(id: string) {
 
 export async function setTournamentStatus(id: string, status: Tournament["status"]) {
   return run(async () => {
+    await requireMember();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
@@ -1322,6 +1495,7 @@ function pairSessionRound(db: Database, sessionId: string, E: Msgs): number {
 
 export async function sessionStart(fd: FormData) {
   return run(async () => {
+    await requireMember();
     const ids = [...new Set(fd.getAll("playerIds").map(String))];
     if (ids.length < 2) return;
     const E = await msgs();
@@ -1347,6 +1521,7 @@ export async function sessionStart(fd: FormData) {
 
 export async function sessionNextRound(id: string) {
   return run(async () => {
+    await requireMember();
     const E = await msgs();
     const round = await mutate((db) => pairSessionRound(db, id, E));
     revalidateAll();
@@ -1357,6 +1532,7 @@ export async function sessionNextRound(id: string) {
 /** Regenerates the current round as long as no result has been entered. */
 export async function sessionRepair(id: string) {
   return run(async () => {
+    await requireMember();
     const E = await msgs();
     const round = await mutate((db): number | undefined => {
       const s = db.sessions.find((x) => x.id === id);
@@ -1377,6 +1553,7 @@ export async function sessionRepair(id: string) {
 /** Late arrival: joins immediately if someone has a bye, otherwise waits for the next round. */
 export async function sessionAddPlayer(id: string, fd: FormData) {
   return run(async () => {
+    await requireMember();
     const playerId = str(fd, "playerId");
     if (!playerId) return;
     await mutate((db) => {
@@ -1410,6 +1587,7 @@ export async function sessionAddPlayer(id: string, fd: FormData) {
 /** Someone leaves early: remove from the night; an unplayed board is dissolved and the opponent gets a bye. */
 export async function sessionRemovePlayer(id: string, playerId: string) {
   return run(async () => {
+    await requireMember();
     await mutate((db) => {
       const s = db.sessions.find((x) => x.id === id);
       if (!s) return;
@@ -1434,6 +1612,7 @@ export async function sessionRemovePlayer(id: string, playerId: string) {
 
 export async function sessionClose(id: string) {
   return run(async () => {
+    await requireMember();
     await mutate((db) => {
       const s = db.sessions.find((x) => x.id === id);
       if (!s) return;

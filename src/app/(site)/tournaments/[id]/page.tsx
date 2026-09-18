@@ -37,6 +37,7 @@ import { ResultButtons } from "@/components/ResultButtons";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { Crosstable } from "@/components/Crosstable";
+import { GuestNotice } from "@/components/GuestNotice";
 import {
   Avatar,
   ColorDot,
@@ -65,6 +66,8 @@ export default async function TournamentPage({
   const db = await readDb();
   const admin = await isAdmin();
   const me = await currentPlayerId();
+  /** Organising (pairing, finishing, participants, boards) is for members; guests only read. */
+  const member = admin || !!me;
   const t = db.tournaments.find((x) => x.id === id);
   if (!t) notFound();
 
@@ -180,7 +183,7 @@ export default async function TournamentPage({
                 <Icon name="tv" className="h-4 w-4" /> {msg.common.tv}
               </Link>
             )}
-            {!finished && (
+            {member && !finished && (
               <form action={generateNextRound.bind(null, t.id)}>
                 <SubmitButton
                   className="btn btn-primary"
@@ -202,7 +205,7 @@ export default async function TournamentPage({
                 </SubmitButton>
               </form>
             )}
-            {t.status === "running" && (
+            {member && t.status === "running" && (
               <form action={setTournamentStatus.bind(null, t.id, "finished")}>
                 <SubmitButton
                   className={`btn ${roundsLeft <= 0 && lastComplete ? "btn-primary" : ""}`}
@@ -212,7 +215,7 @@ export default async function TournamentPage({
                 </SubmitButton>
               </form>
             )}
-            {finished && (
+            {member && finished && (
               <form action={setTournamentStatus.bind(null, t.id, "running")}>
                 <SubmitButton className="btn">{msg.tournaments.reopen}</SubmitButton>
               </form>
@@ -239,6 +242,8 @@ export default async function TournamentPage({
           {fmt(msg.tournaments.roundsProgress, { n: t.rounds.length, total: t.plannedRounds })}
         </span>
       </div>
+
+      {!member && !finished && <GuestNotice className="mb-6" />}
 
       {finished && isKO && placement.length > 0 && (
         <div className="card mb-6 border-accent/40 bg-gradient-to-r from-accent/10 to-transparent flex flex-wrap items-center gap-6">
@@ -347,7 +352,8 @@ export default async function TournamentPage({
               right={
                 !finished ? (
                   <span className="flex items-center gap-2 no-print">
-                    {!isKO &&
+                    {member &&
+                      !isKO &&
                       !roundHasResults(db, last) &&
                       editRound !== last.number && (
                         <Link
@@ -371,7 +377,7 @@ export default async function TournamentPage({
               }
               flush
             >
-              {editRound === last.number && !roundHasResults(db, last) ? (
+              {member && editRound === last.number && !roundHasResults(db, last) ? (
                 <EditRound t={t} round={last} names={names} msg={msg} />
               ) : (
                 <PairingReveal
@@ -392,7 +398,7 @@ export default async function TournamentPage({
                   />
                 </PairingReveal>
               )}
-              {lastComplete && canGenerate && (
+              {member && lastComplete && canGenerate && (
                 <div className="px-5 py-4 border-t border-line flex items-center justify-between gap-3 bg-panel-2/40 no-print">
                   <span className="text-sm text-muted">
                     {msg.tournaments.allResultsIn}
@@ -407,7 +413,7 @@ export default async function TournamentPage({
                   </form>
                 </div>
               )}
-              {lastComplete && roundsLeft <= 0 && t.status === "running" && (
+              {member && lastComplete && roundsLeft <= 0 && t.status === "running" && (
                 <div className="px-5 py-4 border-t border-line flex items-center justify-between gap-3 bg-panel-2/40 no-print">
                   <span className="text-sm text-muted">
                     {msg.tournaments.finalRoundComplete}
@@ -665,14 +671,16 @@ export default async function TournamentPage({
                           >
                             {names.get(pid)?.name}
                           </span>
-                          <form
-                            action={toggleWithdraw.bind(null, t.id, pid)}
-                            className="ml-auto"
-                          >
-                            <SubmitButton className="btn btn-sm btn-ghost">
-                              {withdrawn ? msg.tournaments.rejoin : msg.tournaments.withdraw}
-                            </SubmitButton>
-                          </form>
+                          {member && (
+                            <form
+                              action={toggleWithdraw.bind(null, t.id, pid)}
+                              className="ml-auto"
+                            >
+                              <SubmitButton className="btn btn-sm btn-ghost">
+                                {withdrawn ? msg.tournaments.rejoin : msg.tournaments.withdraw}
+                              </SubmitButton>
+                            </form>
+                          )}
                         </li>
                       );
                     })}
@@ -685,6 +693,16 @@ export default async function TournamentPage({
                       ? msg.tournaments.participantsHintStarted
                       : msg.tournaments.participantsHintNew}
                   </p>
+                  {!member ? (
+                    <ul className="flex flex-col gap-1.5 text-sm">
+                      {t.participantIds.map((pid) => (
+                        <li key={pid} className="flex items-center gap-2">
+                          <Avatar id={pid} name={names.get(pid)?.name ?? "?"} size="xs" />
+                          <span className={t.withdrawnIds.includes(pid) ? "line-through text-muted" : ""}>{names.get(pid)?.name}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
                   <form
                     action={setParticipants.bind(null, t.id)}
                     className="flex flex-col gap-3"
@@ -717,7 +735,8 @@ export default async function TournamentPage({
                       {msg.tournaments.saveParticipants}
                     </SubmitButton>
                   </form>
-                  {t.rounds.length > 0 && (
+                  )}
+                  {member && t.rounds.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-line">
                       <div className="label">{msg.tournaments.withdrawRejoin}</div>
                       <div className="flex flex-wrap gap-1.5">

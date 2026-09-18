@@ -74,6 +74,8 @@ const en = {
   saving: "Saving…",
   onlyOwnBoard: "Only the players of this board can enter the result.",
   claimToEnter: "Tell this device who you are to enter your results.",
+  onlyMembers: "Members only.",
+  guestBrowse: "You are browsing as a guest. Members start club nights, pair rounds and enter results; pick your face to join in.",
   whoAreYou: "Who are you?",
   reveal: {
     drawing: "Drawing boards…",
@@ -158,6 +160,8 @@ const de: typeof en = {
   saving: "Speichern…",
   onlyOwnBoard: "Nur die Spieler dieses Bretts können das Ergebnis eintragen.",
   claimToEnter: "Sag diesem Gerät, wer du bist, um deine Ergebnisse einzutragen.",
+  onlyMembers: "Nur für Mitglieder.",
+  guestBrowse: "Du schaust als Gast zu. Mitglieder starten Vereinsabende, losen Runden aus und tragen Ergebnisse ein; wähle dein Gesicht, um mitzumachen.",
   whoAreYou: "Wer bist du?",
   reveal: {
     drawing: "Bretter werden ausgelost…",

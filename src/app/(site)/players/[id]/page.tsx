@@ -9,6 +9,8 @@ import { AvatarPicker } from "@/components/AvatarPicker";
 import { achievements, attendance, nextTitle, titleFor } from "@/lib/club";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { changeOwnPin, deletePlayer, resetPin, unclaimProfile, updatePlayer } from "@/lib/actions";
+import { openBetween, upcoming } from "@/lib/challenges";
+import { ChallengeCard, ChallengeForm } from "@/components/ChallengeCard";
 import { colorStats, formatDateTime, gamesForPlayer, playerMap, rankChanges, ratingHistory, recentForm, resultLabel, rivals, streaks } from "@/lib/queries";
 import { isForfeit, scoreFor } from "@/lib/elo";
 import { RatingChart } from "@/components/RatingChart";
@@ -54,6 +56,9 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
   const locked = badges.filter((a) => !a.earnedAt);
   const att = attendance(db, player);
   const p = msg.players.profile;
+  const member = admin || !!me;
+  const theirUpcoming = upcoming(db, player.id);
+  const between = me && !isMe ? openBetween(db, me, player.id) : undefined;
 
   return (
     <>
@@ -214,6 +219,31 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
         </div>
 
         <div className="col-stack">
+          {!isMe && (member || theirUpcoming.length > 0) && (
+            <Section title={member ? fmt(msg.challenges.challengeName, { name: player.name }) : msg.challenges.upcoming} right={<Link href="/challenges" className="btn btn-sm btn-ghost">{msg.challenges.title}</Link>}>
+              <div className="flex flex-col gap-3">
+                {theirUpcoming.length > 0 && (
+                  <ul className="flex flex-col gap-3">
+                    {theirUpcoming.slice(0, 3).map((c) => (
+                      <ChallengeCard key={c.id} c={c} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} />
+                    ))}
+                  </ul>
+                )}
+                {member && !between && player.active && (
+                  <>
+                    <p className="text-xs text-muted">{msg.challenges.onProfileHint}</p>
+                    <ChallengeForm players={db.players} me={me} admin={admin} toId={player.id} t={msg} />
+                  </>
+                )}
+                {between && !theirUpcoming.some((c) => c.id === between.id) && (
+                  <ul className="flex flex-col gap-3">
+                    <ChallengeCard c={between} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} />
+                  </ul>
+                )}
+                {!member && <p className="text-xs text-muted">{msg.challenges.guest}</p>}
+              </div>
+            </Section>
+          )}
           <Section title={p.achievements} right={<span className="text-xs text-muted">{fmt(p.nOfTotal, { n: earned.length, total: badges.length })}</span>}>
             {earned.length === 0 ? (
               <p className="text-sm text-muted mb-3">{p.nothingEarned}</p>

@@ -1,110 +1,164 @@
 # Chess Club
 
-Local-only manager for a workplace chess club. No accounts, no cloud: everything is stored in `data/db.json` next to the code,
-with automatic daily snapshots in `data/backups/`.
+**The whole club in one place: players and Elo, club nights, tournaments, seasons and a hall of fame.**
+Runs on one laptop from a JSON file, or on Vercel with a free Postgres database. No accounts. English and German,
+light and dark, phone friendly. Set up in ten minutes, used on club night from phones around the room.
 
-## Run
+<p align="center">
+  <img src="docs/screenshots/home.jpg" alt="Home page: quote of the day, key numbers, rankings and recent games" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/mobile.png" alt="Phone view: home with the bottom tab bar, and a tournament round as board cards" width="62%">
+</p>
+
+## Contents
+
+- [Who it is for](#who-it-is-for)
+- [Quick start](#quick-start)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [How it works](#how-it-works)
+- [Configuration](#configuration)
+- [Deploying to Vercel](#deploying-to-vercel)
+- [Security](#security)
+- [What it is not](#what-it-is-not)
+- [Development](#development)
+- [License](#license)
+
+## Who it is for
+
+A workplace or neighbourhood chess club of 5 to 50 people that meets regularly, wants a real rating list and the
+occasional tournament, and does not want to manage user accounts. One person is the admin; everyone else opens the
+address on their phone, taps their face, and enters their own results.
+
+## Quick start
 
 ```bash
 bun install
-bun run dev          # http://localhost:3000
-bun run dev:lan      # also reachable from phones on the same Wi-Fi (URL shown on the Admin page)
+bun run dev              # http://localhost:5173
 ```
 
-## What it does
+Open `/admin` once to create the admin password, add a few players, and start a club night. For phones on the same
+Wi-Fi use `bun run dev:lan`; the Admin page shows the addresses and a QR code.
 
-- **Players & Elo** – starting rating, W/D/L, form, streaks, rank movement, rating chart, rivals, head-to-head, and a
-  random emoji avatar for everyone (changeable by the admin). Friendly games can be backdated; they slot into the Elo
-  replay at that date.
-  FIDE-style K factors (40 for the first 30 games, 20 afterwards, 10 above 2400). Ratings are always recomputed by
-  replaying every game in order, so editing or deleting a result keeps everything consistent. Forfeits (+/−) count for
-  standings but never for Elo.
-- **Club night** – tick who is present, get random boards with balanced colors, play several rounds in one evening
-  (nobody meets the same opponent twice that night), late arrivals join automatically against the bye, early leavers
-  are removed, results are entered per board with undo.
-- **Tournaments** – four formats:
-  - *Random* and *Swiss*: automatic pairings, no rematches, color balancing (never three of the same color in a row),
-    bye when odd, manual board editing before results are entered, withdrawals.
-  - *Round robin*: Berger schedule, colors balanced, field fixed at start, withdrawn players' games become forfeits.
-  - *Knockout*: bracket seeded by rating (byes for top seeds when the field is not a power of two), 1 or 2 games per
-    match, automatic tiebreak game with swapped colors on a tie, optional 3rd-place match, bracket view and placement.
-  Standings with configurable tiebreaks (Buchholz, Sonneborn-Berger, direct encounter, progressive, wins, wins with black),
-  performance rating, crosstable, podium.
-- **Club life** – the club has a name, motto, founding year, meeting place and a notice board (Admin → Club identity);
-  they appear in the header and on the home page hero, together with a chess quote of the day. **Seasons** have their own table (1 point per
-  win, ½ per draw across every game; playing more counts on purpose) and a champion crowned when the admin closes the
-  season. **Titles** follow the rating from 10 games on: Club Player 1100, Expert 1300, Master 1500, Grandmaster 1700.
-  **Achievements** (First Blood, Hat-trick, Giant Slayer, Perfect Night, Familiar Face, …) are derived from games and
-  club nights and shown on profiles. The **Hall of Fame** collects season champions, tournament winners, player of the
-  month, title holders, most decorated players and club records. The home page opens with a hero and "Around the club"
-  highlights (upsets, streaks, climbers, new faces, the season race).
-- **Look** – club mark (a drawn knight), serif display type, chessboard-textured hero, cartoon character avatars generated from
-  a seed (hair, face, shirt and colours; unique per player, changeable by the admin), line icons and medal ranks.
-- **Stats** – white/black/draw split, activity per month, rating race of the top players, monthly table (month champion),
-  records (biggest upset, highest rating, longest streak).
-- **Admin** – password-protected (salted scrypt hash in the JSON file, signed httpOnly cookie bound to that hash, so a
-  new password signs every other admin device out). Only the admin can edit or
-  delete players, rounds, tournaments and club nights, change settings, download/import the database, take, download,
-  restore or delete a snapshot, merge two records of the same person, and bulk-delete from the **Danger zone** (whole
-  club, history only, all tournaments, all club nights or all friendlies; a snapshot is taken first). **Sign out
-  everyone** rotates the cookie secret so every device has to sign in again. An optional **owner password** (Admin → Owner
-  password) puts a second lock on those destructive tools, for clubs where several people share the admin password: it is
-  asked per action, the admin password alone cannot change it, and only the recovery token can reset it.
-  Everyone can add players, pair and enter results. The admin sign-in lives at `/admin` (no link in the header until
-  signed in). An **activity log** on the Admin page lists every result, pairing and
-  edit with a timestamp and whether it was done while signed in as admin, so changes made from phones on the network can be
-  traced; it can be searched and filtered by admin/guest. A **Data health** card runs the same consistency checks as the
-  `inspect-db` skill (dangling references, misplaced games, rating drift) on every visit. A **QR code** of the current address lets phones open the
-  club without typing.
-- **Member code** – optional single shared code for the whole club (Admin → Member code), like a Wi-Fi password. Five wrong
-  codes (or admin passwords, or PINs) in a row lock that secret for ten minutes.
-  When set, visitors see a join screen once and the device is remembered for 90 days; changing the code signs everyone
-  out, turning it off reopens the club. Admins pass regardless. Meant for a public deployment; leave it off on the
-  office network.
-- **Who are you?** – accounts without logins. A device's first visit lands on a welcome screen: pick your face, or join
-  with your name and a four-digit PIN, or *Just browsing* (asked again after a month). Later the same screen is under
-  *Who are you?* in the header. A player picks their face and enters their four-digit PIN (chosen the first time the profile is claimed). The device then remembers them for a year: their name and
-  avatar sit in the header, their row is marked *you*, and only they (or the admin) can change their avatar or PIN. Five
-  wrong PINs lock it for ten minutes. Forgot the PIN? The admin sets a new one on the player's page, or clears it so the
-  player picks a fresh one. Nobody but the admin can edit or delete a player.
-  Newcomers add themselves once (*Join the club* on the Players page: name + PIN, the device is theirs immediately);
-  once a device knows a player, that form is gone. Only the admin can add other people.
-- **Validation messages** (wrong pairing, round not finished, duplicate name, …) show up as a toast on the page you were on,
-  in development and in production builds alike.
+## Features
 
-## Check
+| | |
+|---|---|
+| **Elo ratings** | FIDE-style K factors, replayed from every game in order, so edits and deletions stay consistent. Forfeits count for standings, never for Elo. |
+| **Club night** | Tick who is here, get random boards with balanced colours, play several rounds, results with undo. Late arrivals join, early leavers drop out. |
+| **Tournaments** | Open pairing, Swiss, round robin (Berger) and knockout brackets with tiebreak games. Configurable tiebreaks, crosstable, performance rating, podium. |
+| **Seasons and titles** | A season table with a champion crowned at the end; Club Player to Club Grandmaster titles by rating; achievements earned over the board. |
+| **Hall of Fame and stats** | Champions, tournament winners, player of the month, records, rating race, activity per month. |
+| **Identity without accounts** | Each device picks a face and a four-digit PIN once. Members start club nights, pair rounds and enter their own results; a device that has not picked a face only browses. |
+| **Challenges** | Propose a game to another member with date, time and place; they accept, decline or suggest another time. Agreed games show on the home page, export to Google Calendar or any calendar app, and turn into a friendly game with one tap once played. |
+| **TV screen** | `/tv` puts the live round and standings on the club room projector, refreshing every five seconds. |
+| **Phone first** | Bottom tab bar, board cards with full-width result buttons, installable as a web app. |
+| **Admin tools** | Snapshots, import and export, data health checks, duplicate merge, a danger zone with an undo path, activity log. |
+| **Two languages, two themes** | English and German, light and dark, both chosen per device. |
+
+## Screenshots
+
+| Tournament, live | Club night |
+|---|---|
+| ![Running Swiss tournament with round boards and standings](docs/screenshots/tournament.jpg) | ![Club night: tick who is present and start](docs/screenshots/club-night.jpg) |
+
+| Player profile | Hall of Fame |
+|---|---|
+| ![Player profile with rating history, achievements and rivals](docs/screenshots/player.jpg) | ![Hall of Fame with season table, title holders and most decorated](docs/screenshots/hall-of-fame.jpg) |
+
+| TV screen | Stats, dark theme |
+|---|---|
+| ![TV screen with the live round and standings](docs/screenshots/tv.jpg) | ![Club statistics in the dark theme](docs/screenshots/stats-dark.jpg) |
+
+## How it works
+
+```mermaid
+flowchart LR
+  phone[Phones and laptops] -->|server actions| actions[actions.ts]
+  actions -->|mutate| db[(db.json or Postgres)]
+  actions --> recompute[recomputeRatings]
+  recompute --> db
+  db -->|readDb| pages[Server-rendered pages]
+  pages --> phone
+  db -.->|daily + before risky changes| snapshots[(snapshots)]
+```
+
+- **One document.** The club is a single JSON document: players, games, tournaments, club nights, seasons, settings
+  and an activity log. Locally it is `data/db.json`; on Vercel it is one row in Postgres. Old files are upgraded on every
+  read.
+- **Ratings are derived.** Nothing stores a rating by hand. After every change the games are replayed in order and
+  the ratings recomputed, so a corrected result three weeks back simply flows through.
+- **Server does the work.** Pages are server components, every change is a server action with its own authorisation
+  check, and writes are versioned so two phones entering results at the same moment cannot overwrite each other.
+- **Snapshots are the undo.** One automatic copy a day, plus one before every import, restore or bulk delete, plus the
+  ones you take by hand. Restore from the Admin page.
+
+## Configuration
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `DATABASE_URL` | Postgres connection string. Set on Vercel (Neon). Empty means the JSON file. | empty |
+| `CHESS_DATA_DIR` | Folder for `db.json` and `backups/` in file mode. Handy for a second club or a test copy. | `./data` |
+| `ADMIN_RESET_TOKEN` | Enables *Forgot the password?* on `/admin`. Set it, reset, remove it again. | empty |
+| `NEXT_DIST_DIR` | Build folder, so a second instance does not fight the first one over `.next`. | `.next` |
+
+Club-level settings (starting Elo, bye points, default tiebreaks, language, passwords, member code) live in the app
+under Admin, not in the environment. A `.env.example` is included.
+
+## Deploying to Vercel
+
+1. Push the repo to GitHub and import it in Vercel. Bun is detected from `bun.lock`.
+2. In the Vercel project open **Storage → Create Database → Neon** and connect it. This sets `DATABASE_URL`. Any
+   Postgres works.
+3. Deploy. The app creates its two tables on the first request.
+4. Open `/admin`, create the admin password, then **Data → Import** your local `data/db.json` to carry the club over.
+5. On **Security** set an owner password and a member code, so the public address is not an open door.
+
+## Security
+
+- **Admin password** – salted scrypt hash; the signed httpOnly cookie is bound to that hash, so changing the password
+  signs every other admin device out.
+- **Owner password** – optional second password for the destructive tools (danger zone, import and restore, deleting
+  snapshots, merging players, member code, admin password, sign out everyone). Asked per action. The admin password
+  alone cannot change it.
+- **Member code** – optional shared code for the whole club, like a Wi-Fi password. Devices are remembered for 90 days;
+  a new code signs everyone out.
+- **Player PIN** – four digits per player; only that device (or the admin) can touch that player's results and profile.
+  Devices without a claimed player are guests: every organising action is refused server-side, not only hidden.
+- **Brute-force brake** – five wrong tries lock a PIN, password or code for ten minutes.
+- **Sign out everyone** – rotates the cookie secret; every device signs in again.
+- **Headers** – Content-Security-Policy, frame and sniffing protection, referrer and permissions policies, `noindex`.
+- **Recovery** – set `ADMIN_RESET_TOKEN`, open `/admin` → *Forgot the password?*, choose admin or owner password, then
+  remove the variable. Locally you can also delete the hash field from `data/db.json`.
+
+## What it is not
+
+- **Not a chess server.** It records results, not moves. No board, no clock, no engine.
+- **Not a federation tool.** No DWZ, Elo or FIDE reporting, no PGN export.
+- **Not multi-club.** One installation is one club. Run a second instance with another `CHESS_DATA_DIR` for another club.
+- **Not a messenger.** Challenges let two members agree on a date, but nothing is pushed or mailed: people see what
+  waits for them when they open the site (a badge in the header), or via the calendar file they can download.
+
+## Development
 
 ```bash
-bun test             # unit tests for Elo, pairings, standings, migrations and backups
+bun test                 # unit tests in src/lib/__tests__
 bunx tsc --noEmit
 bun run lint
 bun run build
+
+# a second, isolated instance with its own data and build folder
+CHESS_DATA_DIR=.demo-data NEXT_DIST_DIR=.next-e2e bun run dev -- -p 3001
 ```
 
-## Deploying to Vercel (optional)
+Next.js 16 (App Router, server components and actions), Bun, Tailwind v4, `@neondatabase/serverless` and `qrcode`.
+The domain logic (`src/lib`: Elo, pairing, knockout, standings, seasons, reset, merge, health, lockout, tokens) is pure
+TypeScript with unit tests; pages and actions are thin on top of it. `CLAUDE.md` documents the conventions, and
+`.claude/skills/` holds repo-specific skills for Claude Code (`check`, `seed-demo`, `inspect-db`, `new-action`,
+`new-page`, `write-test`).
 
-Locally the club is a JSON file. On Vercel the filesystem is read-only, so the same app stores everything in Postgres
-when `DATABASE_URL` is set. Nothing else changes: same pages, same admin, same import/export.
+## License
 
-1. Push the repo to GitHub and import it in Vercel (framework: Next.js, Bun is detected from `bun.lock`).
-2. In the Vercel project, open **Storage → Create Database → Neon** (free tier) and connect it. This adds
-   `DATABASE_URL` to the environment automatically. Any other Postgres works too: set `DATABASE_URL` by hand.
-3. Deploy. On the first request the app creates the `club_state` and `club_snapshots` tables itself.
-4. Open `/admin` on the deployed site, create the admin password, then **Import a database file** and upload your local
-   `data/db.json` to carry the club over. Daily snapshots now live in the database and are listed on the same page.
-5. Set a **Member code** on the Admin page and share it with the club, so the public address is not an open door.
-
-Concurrency: writes are versioned, so two people entering results at the same moment cannot overwrite each other.
-
-## Data & backup
-
-- `data/db.json` is the whole club (local mode). Copy it anywhere for a backup, or use **Admin → Download**, which works
-  in both storage modes.
-- One snapshot per day is written to `data/backups/` (the newest 30 files are kept, including the copies taken before an
-  import, restore or reset and the ones you save by hand on the Admin page). Download, restore or delete them from the
-  Admin page.
-- Set `CHESS_DATA_DIR=/some/folder` to run against a different data folder (e.g. a second club or a test copy).
-- Forgot the admin password? Set `ADMIN_RESET_TOKEN` to a long random string in the server environment (Vercel:
-  Settings → Environment Variables, then redeploy; locally `.env.local`), open `/admin` → *Forgot the password?*, choose admin or
-  owner password, enter the token and a new password, then remove the variable again. Locally you can also delete the `adminPasswordHash`
-  field from `data/db.json`.
+[MIT](LICENSE)
