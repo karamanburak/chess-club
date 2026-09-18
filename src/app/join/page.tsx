@@ -22,9 +22,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
   return (
     <main className="min-h-full flex-1 flex items-center justify-center p-6 board-texture">
       <div className="w-full max-w-sm flex flex-col items-center text-center gap-6 fade-up">
-        <span className="grid h-20 w-20 place-items-center rounded-2xl bg-accent text-accent-fg shadow-[inset_0_-3px_0_rgba(0,0,0,.18)]">
-          <KnightMark className="h-14 w-14" />
-        </span>
+        <KnightMark className="h-20 w-20 text-fg" />
         <div>
           <div className="text-[11px] uppercase tracking-[0.18em] text-muted">{t.me.join.membersOnly}</div>
           <h1 className="font-display text-4xl font-semibold tracking-tight mt-1">{club.name}</h1>

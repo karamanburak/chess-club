@@ -1,15 +1,26 @@
 import type { SVGProps } from "react";
 
+const KNIGHT = "M17 94h66v-7c0-2-1.5-3-3.5-3H74c3.5-14 5-30-3-44-2.5-4.5-6-8-10-10.5l-2-14-7 8-9-6-.5 10c-9 3-16 10-20.5 18.5-2 4-3.5 8-3 11 .5 3 3 4.5 6 4l7-1.5c2.5-.5 4.5-2 6-4 1.5 8-1 16-6 23-1.5 2-2 3.5-2 5.5H20.5c-2 0-3.5 1-3.5 3v7z";
+
 /**
- * The club's mark: a knight's head, drawn as one solid shape so it stays
- * crisp at 16px in the header and at 400px as a watermark.
+ * The club's mark: a knight's head split down the middle, the left half in the text colour and the
+ * right half in the club's amber, with a hairline gap between them (white and black, one game).
+ * It stands on its own, no tile behind it, so it reads as one shape next to other favicons.
+ * Override the halves with `--knight-left` / `--knight-right`; `mono` draws it in one colour
+ * (watermarks, print).
  */
-export function KnightMark({ className = "", ...rest }: SVGProps<SVGSVGElement>) {
+export function KnightMark({ className = "", mono = false, ...rest }: SVGProps<SVGSVGElement> & { mono?: boolean }) {
+  if (mono) {
+    return (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor" aria-hidden {...rest}>
+        <path d={KNIGHT} />
+      </svg>
+    );
+  }
   return (
-    <svg viewBox="0 0 100 100" className={className} fill="currentColor" aria-hidden {...rest}>
-      <path d="M17 94h66v-7c0-2-1.5-3-3.5-3H74c3.5-14 5-30-3-44-2.5-4.5-6-8-10-10.5l-2-14-7 8-9-6-.5 10c-9 3-16 10-20.5 18.5-2 4-3.5 8-3 11 .5 3 3 4.5 6 4l7-1.5c2.5-.5 4.5-2 6-4 1.5 8-1 16-6 23-1.5 2-2 3.5-2 5.5H20.5c-2 0-3.5 1-3.5 3v7z" />
-      <circle cx="52" cy="36" r="3.2" fill="var(--knight-eye, var(--accent))" />
-      <circle cx="23.5" cy="52.5" r="1.7" fill="var(--knight-eye, var(--accent))" />
+    <svg viewBox="0 0 100 100" className={className} aria-hidden {...rest}>
+      <path d={KNIGHT} fill="var(--knight-left, currentColor)" style={{ clipPath: "inset(0 51.5% 0 0)" }} />
+      <path d={KNIGHT} fill="var(--knight-right, var(--accent))" style={{ clipPath: "inset(0 0 0 51.5%)" }} />
     </svg>
   );
 }

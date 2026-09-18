@@ -47,7 +47,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   return (
     <>
       <section className="card board-texture mb-6 relative overflow-hidden p-5 md:p-6">
-        <KnightMark className="pointer-events-none select-none absolute -right-6 -top-6 h-44 w-44 text-fg opacity-[0.04]" style={{ ["--knight-eye" as string]: "transparent" }} />
+        <KnightMark mono className="pointer-events-none select-none absolute -right-6 -top-6 h-44 w-44 text-fg opacity-[0.04]" />
         <div className="relative flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
           <div className="min-w-0 flex-1 flex flex-col gap-3">
             <h1 className="sr-only">{club.name}</h1>

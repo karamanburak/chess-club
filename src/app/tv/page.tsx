@@ -33,9 +33,7 @@ export default async function TvPage() {
       <AutoRefresh seconds={5} />
       <header className="flex items-center justify-between gap-6 board-texture rounded-3xl border border-line px-8 py-6">
         <div className="flex items-center gap-5 min-w-0">
-          <span className="grid h-16 w-16 place-items-center rounded-2xl bg-accent text-accent-fg shrink-0">
-            <KnightMark className="h-11 w-11" />
-          </span>
+          <KnightMark className="h-16 w-16 shrink-0 text-fg" />
           <div className="min-w-0">
             <div className="text-xs uppercase tracking-[0.2em] text-muted">{season ? season.name : t.nav.chessClub}</div>
             <h1 className="font-display text-4xl font-semibold tracking-tight leading-none truncate">{club.name}</h1>

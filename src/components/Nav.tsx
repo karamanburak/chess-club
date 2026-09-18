@@ -116,9 +116,7 @@ export function Nav({ admin, clubName, me, waiting = 0 }: { admin: boolean; club
     <header className="border-b border-line bg-bg/85 backdrop-blur sticky top-0 z-20 no-print">
       <div className="mx-auto max-w-6xl px-4 h-16 flex items-center gap-4">
         <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent text-accent-fg shadow-[inset_0_-2px_0_rgba(0,0,0,.18)] group-hover:brightness-110 transition">
-            <KnightMark className="h-7 w-7" />
-          </span>
+          <KnightMark className="h-10 w-10 text-fg transition group-hover:brightness-110" />
           <span className="block leading-tight">
             <span className="block font-display font-semibold text-[17px] tracking-tight max-w-36 sm:max-w-44 truncate">{clubName}</span>
             {!/chess\s*club|schach/i.test(clubName) && <span className="block text-[10px] uppercase tracking-[0.18em] text-muted">{t.nav.chessClub}</span>}
