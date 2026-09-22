@@ -7,7 +7,7 @@ import { after } from "next/server";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot } from "./db";
 import { mergeCheck, mergePlayers as mergeRecords, type MergeProblem } from "./merge";
-import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireChallenges, involves, type ChallengeProblem } from "./challenges";
+import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireChallenges, involves, TIME_CONTROL_RE, type ChallengeProblem } from "./challenges";
 import { RESULTS, recomputeRatings } from "./elo";
 import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
@@ -960,8 +960,18 @@ async function challengeActor(fallback?: string | null): Promise<{ admin: boolea
   return { admin: who.admin, me: who.me ?? fallback ?? null };
 }
 
-export async function createChallenge(fd: FormData) {
-  return run(async () => {
+/** What the challenge form gets back: an error with the typed values to keep, or the moment it went through. */
+export interface ChallengeFormState {
+  error?: string;
+  values?: Record<string, string>;
+  ok?: number;
+}
+
+const CHALLENGE_FIELDS = ["fromId", "toId", "date", "time", "place", "timeControl", "rated", "note"] as const;
+
+/** useActionState action: on a user error the typed values come back so the form does not reset. */
+export async function createChallenge(_prev: ChallengeFormState, fd: FormData): Promise<ChallengeFormState> {
+  const res = await attempt(async () => {
     const E = await msgs();
     const who = await challengeActor(str(fd, "fromId") || null);
     const fromId = who.admin && str(fd, "fromId") ? str(fd, "fromId") : who.me;
@@ -971,6 +981,7 @@ export async function createChallenge(fd: FormData) {
     if (!at) throw new UserError(E.challengePast);
     // Where and how fast are part of the deal, not decoration: the form marks them required, the server insists.
     if (!str(fd, "place") || !str(fd, "timeControl")) throw new UserError(E.challengeDetails);
+    if (!TIME_CONTROL_RE.test(str(fd, "timeControl"))) throw new UserError(E.timeControlFormat);
     await mutate((db) => {
       expireChallenges(db);
       const problem = challengeCheck(db, fromId, toId, at);
@@ -996,6 +1007,8 @@ export async function createChallenge(fd: FormData) {
     });
     revalidateAll();
   });
+  if (res.error) return { error: res.error, values: Object.fromEntries(CHALLENGE_FIELDS.map((k) => [k, str(fd, k)])) };
+  return { ok: Date.now() };
 }
 
 function findChallenge(db: Database, id: string, E: Msgs) {

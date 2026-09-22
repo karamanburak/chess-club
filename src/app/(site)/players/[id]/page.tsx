@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { localDay } from "@/lib/time";
 import { Icon } from "@/components/icons";
 import Link from "next/link";
 import { readDb } from "@/lib/db";
@@ -9,8 +10,9 @@ import { AvatarPicker } from "@/components/AvatarPicker";
 import { achievements, attendance, nextTitle, titleFor } from "@/lib/club";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { changeOwnPin, deletePlayer, resetPin, unclaimProfile, updatePlayer } from "@/lib/actions";
-import { openBetween, upcoming } from "@/lib/challenges";
-import { ChallengeCard, ChallengeForm } from "@/components/ChallengeCard";
+import { challengeOpponents, openBetween, upcoming } from "@/lib/challenges";
+import { ChallengeCard } from "@/components/ChallengeCard";
+import { ChallengeForm } from "@/components/ChallengeForm";
 import { colorStats, formatDateTime, gamesForPlayer, playerMap, rankChanges, ratingHistory, recentForm, resultLabel, rivals, streaks } from "@/lib/queries";
 import { isForfeit, scoreFor } from "@/lib/elo";
 import { RatingChart } from "@/components/RatingChart";
@@ -233,7 +235,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                 {member && !between && player.active && (
                   <>
                     <p className="text-xs text-muted">{msg.challenges.onProfileHint}</p>
-                    <ChallengeForm players={db.players} me={me} admin={admin} toId={player.id} t={msg} />
+                    <ChallengeForm players={challengeOpponents(db)} me={me} admin={admin} toId={player.id} today={localDay()} />
                   </>
                 )}
                 {between && !theirUpcoming.some((c) => c.id === between.id) && (

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { awaitsAnswerFrom, challengeCheck, combineDateTime, playedSummary, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, sentBy, toIcs, upcoming } from "../challenges";
+import { awaitsAnswerFrom, challengeCheck, cleanTimeControl, combineDateTime, playedSummary, TIME_CONTROL_RE, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, sentBy, toIcs, upcoming } from "../challenges";
 import { db, game, player } from "./fixtures";
 import type { Challenge } from "../types";
 
@@ -158,5 +158,21 @@ describe("playedSummary", () => {
     expect(playedSummary(g, "c")).toEqual({ outcome: null, delta: null });
     expect(playedSummary(g, null)).toEqual({ outcome: null, delta: null });
     expect(playedSummary(game("a", "b", null), "a")).toEqual({ outcome: null, delta: null });
+  });
+});
+
+describe("time control field", () => {
+  test("accepts minutes with an optional +increment and nothing else", () => {
+    for (const ok of ["15+10", "5+3", "10", "90+30"]) expect(TIME_CONTROL_RE.test(ok)).toBe(true);
+    for (const bad of ["", "+10", "15+", "15 + 10", "15+10+5", "blitz", "15min", "5-3"]) expect(TIME_CONTROL_RE.test(bad)).toBe(false);
+  });
+
+  test("while typing, letters vanish, a leading + is dropped and only the first + survives", () => {
+    expect(cleanTimeControl("15+10")).toBe("15+10");
+    expect(cleanTimeControl("+15")).toBe("15");
+    expect(cleanTimeControl("1a5+b10")).toBe("15+10");
+    expect(cleanTimeControl("15++10")).toBe("15+10");
+    expect(cleanTimeControl("15+10+5")).toBe("15+105");
+    expect(cleanTimeControl("blitz")).toBe("");
   });
 });

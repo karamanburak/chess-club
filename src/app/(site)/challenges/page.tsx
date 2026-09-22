@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { localDay } from "@/lib/time";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { getT } from "@/lib/lang";
-import { effectiveStatus, history, involves, pendingFor, sentBy, upcoming } from "@/lib/challenges";
+import { challengeOpponents, effectiveStatus, history, involves, pendingFor, sentBy, upcoming } from "@/lib/challenges";
 import { playerMap } from "@/lib/queries";
-import { ChallengeCard, ChallengeForm } from "@/components/ChallengeCard";
+import { ChallengeCard } from "@/components/ChallengeCard";
+import { ChallengeForm } from "@/components/ChallengeForm";
 import { GuestNotice } from "@/components/GuestNotice";
 import { Empty, PageHeader, Section } from "@/components/ui";
 
@@ -77,7 +79,7 @@ export default async function ChallengesPage() {
         </div>
         <div className="col-stack">
           <Section title={m.new}>
-            <ChallengeForm players={db.players} me={me} admin={admin} t={t} />
+            <ChallengeForm players={challengeOpponents(db)} me={me} admin={admin} today={localDay()} />
           </Section>
           {played.length > 0 && (
             <Section title={m.playedTitle}>

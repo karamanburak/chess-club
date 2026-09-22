@@ -102,6 +102,32 @@ export function openBetween(db: Database, a: string, b: string, now = Date.now()
 
 export type ChallengeProblem = "self" | "notFound" | "inactive" | "past" | "exists";
 
+/** The little the challenge form (a client component) needs to know about a player; never the whole record, it carries the PIN hash. */
+export interface ChallengeOpponent {
+  id: string;
+  name: string;
+  rating: number;
+  /** Avatar seed, so the picker can draw the face client-side. */
+  avatar: string;
+}
+
+export function challengeOpponents(db: Database): ChallengeOpponent[] {
+  return db.players.filter((p) => p.active).map((p) => ({ id: p.id, name: p.name, rating: p.rating, avatar: p.avatar }));
+}
+
+/** "15+10", "5+3" or plain "10": minutes, optionally +increment. Nothing else. */
+export const TIME_CONTROL_RE = /^\d+(\+\d+)?$/;
+
+/** What the time-control field keeps while typing: digits and one "+", and the "+" only after a digit. */
+export function cleanTimeControl(raw: string): string {
+  let out = "";
+  for (const ch of raw) {
+    if (/\d/.test(ch)) out += ch;
+    else if (ch === "+" && out.length > 0 && !out.includes("+")) out += ch;
+  }
+  return out.slice(0, 20);
+}
+
 /** A challenge may be a little in the past: "right now" is stamped before the check runs, and clocks differ. */
 export const PAST_GRACE_MS = 15 * 60_000;
 

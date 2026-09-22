@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { answerChallenge, cancelChallenge, createChallenge, proposeChallengeTime, recordChallengeResult } from "@/lib/actions";
+import { answerChallenge, cancelChallenge, proposeChallengeTime, recordChallengeResult } from "@/lib/actions";
 import { effectiveStatus, googleCalendarUrl, isToday, playedSummary, SETTLED_QUIET } from "@/lib/challenges";
 import { fmt, type Dict, type Lang } from "@/lib/i18n";
 import { formatDateTime, resultLabel } from "@/lib/queries";
@@ -7,7 +7,6 @@ import { localDay, localTime } from "@/lib/time";
 import type { Challenge, Game, Player } from "@/lib/types";
 import { ConfirmButton } from "./ConfirmButton";
 import { ResultButtons } from "./ResultButtons";
-import { NowButton } from "./NowButton";
 import { Icon } from "./icons";
 import { SubmitButton } from "./SubmitButton";
 import { Avatar, ColorDot, Pill, PlayerLink } from "./ui";
@@ -206,92 +205,5 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", gam
         </div>
       )}
     </li>
-  );
-}
-
-/** Form to challenge someone. `toId` fixes the opponent (profile page); `fromId` lets the admin act for a player. */
-export function ChallengeForm({ players, me, admin, toId, t }: { players: Player[]; me: string | null; admin: boolean; toId?: string; t: Dict }) {
-  const m = t.challenges;
-  const others = players.filter((p) => p.active && p.id !== me);
-  const today = localDay();
-  return (
-    <form action={createChallenge} className="flex flex-col gap-3 text-sm">
-      {admin && !me && (
-        <div>
-          <label className="label">{t.common.player}</label>
-          <select name="fromId" required className="w-full">
-            {players.filter((p) => p.active && p.id !== toId).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      {toId ? (
-        <input type="hidden" name="toId" value={toId} />
-      ) : (
-        <div>
-          <label className="label">{m.opponent}</label>
-          <select name="toId" required className="w-full" defaultValue="">
-            <option value="" disabled>
-              —
-            </option>
-            {others.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.rating})
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      <div>
-        <div className="flex items-end justify-between gap-2">
-          <label className="label">{m.when}</label>
-          <NowButton label={m.now} title={m.nowHint} className="btn btn-sm btn-ghost -mb-1 text-xs text-muted hover:text-accent" />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <input name="date" type="date" required defaultValue={today} className="w-full" aria-label={m.date} />
-          <input name="time" type="time" required defaultValue="18:00" className="w-full" aria-label={m.time} />
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">{m.place}</label>
-          <input name="place" required maxLength={80} placeholder={m.placePlaceholder} className="w-full" />
-        </div>
-        <div>
-          <label className="label">{m.timeControl}</label>
-          <input name="timeControl" required maxLength={20} placeholder="15+10" list="tc-challenge" className="w-full" />
-          <datalist id="tc-challenge">
-            <option value="5+3" />
-            <option value="10+0" />
-            <option value="15+10" />
-            <option value="25+10" />
-          </datalist>
-        </div>
-      </div>
-      <div>
-        <label className="label">{m.ratedLabel}</label>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            ["on", m.ratedOn],
-            ["off", m.ratedOff],
-          ].map(([v, l], i) => (
-            <label key={v} className="chip justify-center text-xs">
-              <input type="radio" name="rated" value={v} defaultChecked={i === 0} className="sr-only" />
-              {l}
-            </label>
-          ))}
-        </div>
-      </div>
-      <div>
-        <label className="label">{m.note}</label>
-        <input name="note" maxLength={200} placeholder={m.notePlaceholder} className="w-full" />
-      </div>
-      <SubmitButton className="btn btn-primary self-start" pendingText={m.sending}>
-        <Icon name="swords" className="h-4 w-4" /> {m.send}
-      </SubmitButton>
-    </form>
   );
 }
