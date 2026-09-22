@@ -38,7 +38,7 @@ import { fmt, isLang, LANG_COOKIE, type Dict, type Lang } from "./i18n";
 import { getT } from "./lang";
 import { ntfyTopic, sendNotifications, type Notification } from "./notify";
 import { requestOrigin } from "./request-url";
-import { dayOf, localDay, zonedToUtc } from "./time";
+import { dayOf, localDay, localStamp, zonedToUtc } from "./time";
 import { currentSeason, seasonTable } from "./club";
 import type { Database, Game, GameResult, PairingMode, TiebreakKey, Tournament } from "./types";
 
@@ -992,7 +992,7 @@ export async function createChallenge(fd: FormData) {
         createdAt: now,
         updatedAt: now,
       });
-      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${at.slice(0, 16).replace("T", " ")}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
+      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${localStamp(at)}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
     });
     revalidateAll();
   });
@@ -1044,7 +1044,7 @@ export async function proposeChallengeTime(id: string, fd: FormData) {
       c.whiteId = null;
       c.proposedBy = who.me && involves(c, who.me) ? who.me : c.fromId;
       c.updatedAt = new Date().toISOString();
-      log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}: new time ${at.slice(0, 16).replace("T", " ")} proposed by ${nameOf(db, c.proposedBy)}`);
+      log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}: new time ${localStamp(at)} proposed by ${nameOf(db, c.proposedBy)}`);
     });
     revalidateAll();
   });

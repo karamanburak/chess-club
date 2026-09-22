@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clubTimeZone, dayOf, daysFromToday, localDay, localMonth, localTime, sameLocalDay, zonedToUtc } from "../time";
+import { clubTimeZone, dayOf, daysFromToday, localDay, localMonth, localStamp, localTime, sameLocalDay, zonedToUtc } from "../time";
 
 const BERLIN = "Europe/Berlin";
 
@@ -23,6 +23,11 @@ describe("localDay / localTime / localMonth", () => {
     expect(localDay(d, BERLIN)).toBe("2026-10-01");
     expect(localMonth(d, BERLIN)).toBe("2026-10");
     expect(localDay(d, "UTC")).toBe("2026-09-30");
+  });
+
+  test("the activity-log stamp is club time, so a 17:20Z challenge reads 19:20", () => {
+    expect(localStamp("2026-09-22T17:20:00Z", BERLIN)).toBe("2026-09-22 19:20");
+    expect(localStamp("garbage", BERLIN)).toBe("garbage");
   });
 
   test("midnight in Berlin reads 00:xx, not 24:xx", () => {

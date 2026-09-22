@@ -65,6 +65,12 @@ export function localTime(d: Date, tz = clubTimeZone()): string {
   return `${two(p.hour)}:${two(p.minute)}`;
 }
 
+/** "YYYY-MM-DD HH:MM" in club time, for activity-log lines and notifications. */
+export function localStamp(iso: string, tz = clubTimeZone()): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : `${localDay(d, tz)} ${localTime(d, tz)}`;
+}
+
 /**
  * The club day a stored value falls on. A plain "YYYY-MM-DD" (tournament date, season bound) is already a day and
  * stays as it is; an ISO instant is converted. Anything unparsable comes back unchanged.
