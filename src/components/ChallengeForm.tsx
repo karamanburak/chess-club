@@ -1,12 +1,13 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { createChallenge, type ChallengeFormState } from "@/lib/actions";
-import { cleanTimeControl, type ChallengeOpponent } from "@/lib/challenges";
+import type { ChallengeOpponent } from "@/lib/challenges";
 import { Icon } from "./icons";
 import { NowButton } from "./NowButton";
 import { OpponentPicker } from "./OpponentPicker";
 import { SubmitButton } from "./SubmitButton";
+import { TimeControlField } from "./TimeControlField";
 import { useT } from "./I18nProvider";
 import { useToast } from "./Toast";
 
@@ -21,7 +22,9 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
   const toast = useToast();
   const [state, action] = useActionState(createChallenge, {} as ChallengeFormState);
   const v = state.values ?? {};
-  const others = players.filter((p) => p.id !== me);
+  // The admin picks who challenges; that player must not turn up as their own opponent.
+  const [fromId, setFromId] = useState(v.fromId ?? players.find((p) => p.id !== toId)?.id ?? "");
+  const others = players.filter((p) => p.id !== me && (!admin || me || p.id !== fromId));
 
   useEffect(() => {
     if (state.error) toast.push({ text: state.error, tone: "error" });
@@ -35,7 +38,7 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
       {admin && !me && (
         <div>
           <label className="label">{t.common.player}</label>
-          <select name="fromId" required className="w-full" defaultValue={v.fromId}>
+          <select name="fromId" required className="w-full" value={fromId} onChange={(e) => setFromId(e.target.value)}>
             {players.filter((p) => p.id !== toId).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -62,37 +65,13 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
           <input name="time" type="time" required defaultValue={v.time ?? "18:00"} className="w-full" aria-label={m.time} />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">{m.place}</label>
-          <input name="place" required maxLength={80} defaultValue={v.place ?? ""} placeholder={m.placePlaceholder} className="w-full" />
-        </div>
-        <div>
-          <label className="label">{m.timeControl}</label>
-          <input
-            name="timeControl"
-            required
-            inputMode="numeric"
-            pattern="\d+(\+\d+)?"
-            title={m.timeControlHint}
-            maxLength={20}
-            defaultValue={v.timeControl ?? ""}
-            placeholder="15+10"
-            list="tc-challenge"
-            className="w-full font-mono"
-            onInput={(e) => {
-              const el = e.currentTarget;
-              const clean = cleanTimeControl(el.value);
-              if (clean !== el.value) el.value = clean;
-            }}
-          />
-          <datalist id="tc-challenge">
-            <option value="5+3" />
-            <option value="10+0" />
-            <option value="15+10" />
-            <option value="25+10" />
-          </datalist>
-        </div>
+      <div>
+        <label className="label">{m.place}</label>
+        <input name="place" required maxLength={80} defaultValue={v.place ?? ""} placeholder={m.placePlaceholder} className="w-full" />
+      </div>
+      <div>
+        <label className="label">{m.timeControl}</label>
+        <TimeControlField defaultValue={v.timeControl ?? ""} />
       </div>
       <div>
         <label className="label">{m.ratedLabel}</label>

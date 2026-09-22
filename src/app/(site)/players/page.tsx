@@ -6,8 +6,10 @@ import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
-import { addPlayer, recordFriendlyGame, registerSelf } from "@/lib/actions";
+import { addPlayer, registerSelf } from "@/lib/actions";
 import { FaceSvg } from "@/components/Face";
+import { ChallengeForm } from "@/components/ChallengeForm";
+import { challengeOpponents } from "@/lib/challenges";
 import { leaderboard, recentForm } from "@/lib/queries";
 import { SubmitButton } from "@/components/SubmitButton";
 import { SearchBox } from "@/components/SearchBox";
@@ -165,73 +167,20 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
             </Section>
           )}
 
-          <Section title={t.players.list.friendly.title}>
-            <p className="text-xs text-muted -mt-2 mb-3">{t.players.list.friendly.hint}</p>
+          <Section title={t.challenges.onPlayersTitle}>
+            <p className="text-xs text-muted -mt-2 mb-3">{t.challenges.onPlayersHint}</p>
             {active.length < 2 ? (
-              <p className="text-sm text-muted">{t.players.list.friendly.needTwo}</p>
+              <p className="text-sm text-muted">{t.challenges.needTwo}</p>
             ) : !admin && !me ? (
-              /* Members may only record games they played themselves, so an anonymous device gets a pointer instead of the form. */
+              /* Only a claimed device can challenge, so an anonymous one gets a pointer instead of the form. */
               <Link href="/me" className="flex items-center gap-3 rounded-xl border border-line bg-panel-2/40 px-4 py-3 text-sm hover:border-accent/60 transition-colors">
                 <Icon name="users" className="h-5 w-5 text-accent shrink-0" />
                 <span>
-                  {t.common.claimToEnter} <span className="text-accent font-medium">{t.common.whoAreYou} →</span>
+                  {t.challenges.guest} <span className="text-accent font-medium">{t.common.whoAreYou} →</span>
                 </span>
               </Link>
             ) : (
-              <form action={recordFriendlyGame} className="flex flex-col gap-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">⚪ {t.common.white}</label>
-                    <select name="whiteId" required className="w-full" defaultValue={!admin && me ? me.id : undefined}>
-                      {active.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.rating})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label">⚫ {t.common.black}</label>
-                    <select name="blackId" required className="w-full" defaultValue={active[1]?.id}>
-                      {active.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.rating})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="label">{t.common.result}</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      ["1-0", "1–0", t.players.list.friendly.whiteWins],
-                      ["1/2-1/2", "½–½", t.players.list.friendly.draw],
-                      ["0-1", "0–1", t.players.list.friendly.blackWins],
-                    ].map(([v, l, d], i) => (
-                      <label key={v} className="chip flex-col items-center gap-0.5 py-2">
-                        <input type="radio" name="result" value={v} defaultChecked={i === 0} className="sr-only" />
-                        <span className="font-mono font-medium">{l}</span>
-                        <span className="text-[11px] text-muted">{d}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 items-end">
-                  <div>
-                    <label className="label" htmlFor="friendly-date">
-                      {t.players.list.friendly.playedOn}
-                    </label>
-                    <input id="friendly-date" name="date" type="date" defaultValue={today} max={today} className="w-full" />
-                  </div>
-                  <label className="flex items-center gap-2 text-sm pb-2">
-                    <input type="checkbox" name="rated" value="on" defaultChecked /> {t.players.list.friendly.rated}
-                  </label>
-                </div>
-                <input type="hidden" name="rated" value="off" />
-                <p className="text-xs text-muted -mt-1">{t.players.list.friendly.backdated}</p>
-                <SubmitButton pendingText={t.common.saving}>{t.players.list.friendly.save}</SubmitButton>
-              </form>
+              <ChallengeForm players={challengeOpponents(db)} me={meId} admin={admin} today={today} />
             )}
           </Section>
         </div>

@@ -19,6 +19,19 @@ const en = {
   friendly: "friendly",
   prevPage: "Previous page",
   nextPage: "Next page",
+  // admin: a friendly game entered after the fact
+  past: {
+    title: "Record a past game",
+    hint: "Admin only. A friendly game played without a challenge, or forgotten at the time. Members arrange their games under Challenges, where the result is entered afterwards.",
+    needTwo: "Add at least two players first.",
+    whiteWins: "White wins",
+    draw: "Draw",
+    blackWins: "Black wins",
+    playedOn: "Played on",
+    rated: "Rated",
+    backdated: "Backdated games slot into the Elo history at that date, so ratings are replayed in the right order.",
+    save: "Save game",
+  },
 };
 const de: typeof en = {
   eyebrow: "Verlauf",
@@ -40,5 +53,17 @@ const de: typeof en = {
   friendly: "Freundschaftspartie",
   prevPage: "Vorherige Seite",
   nextPage: "Nächste Seite",
+  past: {
+    title: "Vergangene Partie eintragen",
+    hint: "Nur Admin. Eine Freundschaftspartie ohne Herausforderung, oder eine, die damals vergessen wurde. Mitglieder verabreden ihre Partien unter Herausforderungen, wo das Ergebnis danach eingetragen wird.",
+    needTwo: "Lege zuerst mindestens zwei Spieler an.",
+    whiteWins: "Weiß gewinnt",
+    draw: "Remis",
+    blackWins: "Schwarz gewinnt",
+    playedOn: "Gespielt am",
+    rated: "Gewertet",
+    backdated: "Nachgetragene Partien landen an ihrem Datum in der Elo-Historie, damit die Wertungen in der richtigen Reihenfolge nachgerechnet werden.",
+    save: "Partie speichern",
+  },
 };
 export const games = { en, de };

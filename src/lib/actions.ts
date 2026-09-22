@@ -1119,15 +1119,15 @@ export async function recordChallengeResult(id: string, fd: FormData) {
 /* Games                                                               */
 /* ------------------------------------------------------------------ */
 
+/** Admin bookkeeping: a friendly game entered after the fact (Games → "Record a past game"). Members go through challenges. */
 export async function recordFriendlyGame(fd: FormData) {
   return run(async () => {
+    await requireAdmin();
     const E = await msgs();
     const whiteId = str(fd, "whiteId");
     const blackId = str(fd, "blackId");
     const result = parseResult(str(fd, "result"), E);
     if (!whiteId || !blackId || whiteId === blackId) return;
-    const who = await whoActs();
-    if (!mayEditGame(who, { whiteId, blackId })) throw new UserError(who.me ? E.friendlyNotYours : E.claimFirst);
     await mutate((db) => {
       const g = makeGame(db, { whiteId, blackId, rated: fd.get("rated") !== "off", tournamentId: null, round: null, board: null, sessionId: null });
       g.result = result;

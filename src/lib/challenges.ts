@@ -5,6 +5,7 @@
  */
 import type { Challenge, ChallengeStatus, Database, Game } from "./types";
 import { scoreFor } from "./elo";
+import { pickable, type PickablePlayer } from "./pick";
 import { sameLocalDay, zonedToUtc } from "./time";
 
 export const EXPIRE_AFTER_MS = 24 * 60 * 60_000;
@@ -102,17 +103,11 @@ export function openBetween(db: Database, a: string, b: string, now = Date.now()
 
 export type ChallengeProblem = "self" | "notFound" | "inactive" | "past" | "exists";
 
-/** The little the challenge form (a client component) needs to know about a player; never the whole record, it carries the PIN hash. */
-export interface ChallengeOpponent {
-  id: string;
-  name: string;
-  rating: number;
-  /** Avatar seed, so the picker can draw the face client-side. */
-  avatar: string;
-}
+/** What the challenge form (a client component) gets per player: see PickablePlayer, never the whole record. */
+export type ChallengeOpponent = PickablePlayer;
 
 export function challengeOpponents(db: Database): ChallengeOpponent[] {
-  return db.players.filter((p) => p.active).map((p) => ({ id: p.id, name: p.name, rating: p.rating, avatar: p.avatar }));
+  return db.players.filter((p) => p.active).map((p) => pickable(p));
 }
 
 /** "15+10", "5+3" or plain "10": minutes, optionally +increment. Nothing else. */

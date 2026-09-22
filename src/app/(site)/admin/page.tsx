@@ -11,6 +11,8 @@ import { ntfyLabel } from "@/lib/notify";
 import { localDay } from "@/lib/time";
 import { checkHealth } from "@/lib/health";
 import { Qr } from "@/components/Qr";
+import { MergePlayersFields } from "@/components/MergePlayersFields";
+import { pickableWithGames } from "@/lib/pick";
 import { formatDate, playerMap } from "@/lib/queries";
 import { formatDateTime, TIEBREAK_PRESETS } from "@/lib/queries";
 import { getT } from "@/lib/lang";
@@ -567,35 +569,10 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                 {sortedPlayers.length < 2 ? (
                   <p className="text-xs text-muted">{a.merge.tooFew}</p>
                 ) : (
-                  <form action={mergePlayers} className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">{a.merge.from}</label>
-                      <select name="fromId" required className="w-full" defaultValue="">
-                        <option value="" disabled>
-                          —
-                        </option>
-                        {sortedPlayers.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} · {p.rating} · {plural(p.gamesPlayed, t.common.gamesN)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label">{a.merge.into}</label>
-                      <select name="intoId" required className="w-full" defaultValue="">
-                        <option value="" disabled>
-                          —
-                        </option>
-                        {sortedPlayers.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} · {p.rating} · {plural(p.gamesPlayed, t.common.gamesN)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {OwnerField && <div className="col-span-2">{OwnerField}</div>}
-                    <SubmitButton className="btn col-span-2" pendingText="…">
+                  <form action={mergePlayers} className="flex flex-col gap-3">
+                    <MergePlayersFields players={pickableWithGames(db)} />
+                    {OwnerField}
+                    <SubmitButton className="btn" pendingText="…">
                       {a.merge.submit}
                     </SubmitButton>
                   </form>

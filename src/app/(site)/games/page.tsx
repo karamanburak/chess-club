@@ -8,6 +8,7 @@ import { deleteGame } from "@/lib/actions";
 import { completedGames, formatDateTime, formatMonth, monthsWithGames, playerMap, resultLabel } from "@/lib/queries";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ResultButtons } from "@/components/ResultButtons";
+import { RecordPastGame } from "@/components/RecordPastGame";
 import { SearchBox } from "@/components/SearchBox";
 import { Empty, PageHeader, PlayerLink, RatingDelta, Section } from "@/components/ui";
 
@@ -212,6 +213,13 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
           </div>
         )}
       </Section>
+      {admin && (
+        <div className="mt-6 grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
+          <Section title={t.games.past.title}>
+            <RecordPastGame players={db.players} />
+          </Section>
+        </div>
+      )}
     </>
   );
 }
