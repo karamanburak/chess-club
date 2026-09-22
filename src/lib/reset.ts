@@ -6,6 +6,7 @@
  * Nothing here takes a snapshot; the actions do that via replaceDb() before saving.
  */
 import type { Database, Season } from "./types";
+import { localDay } from "./time";
 
 export type ResetScope = "everything" | "history" | "tournaments" | "sessions" | "friendlies";
 
@@ -16,7 +17,7 @@ export interface ResetSummary {
   sessions: number;
 }
 
-export function freshSeason(today = new Date().toISOString().slice(0, 10)): Season {
+export function freshSeason(today = localDay()): Season {
   return { id: `season-${today}`, name: `Season ${today.slice(0, 4)}`, start: today, end: null, championId: null };
 }
 

@@ -7,6 +7,7 @@ import { fmt, plural } from "@/lib/i18n";
 import { deleteGame } from "@/lib/actions";
 import { completedGames, formatDateTime, formatMonth, monthsWithGames, playerMap, resultLabel } from "@/lib/queries";
 import { ConfirmButton } from "@/components/ConfirmButton";
+import { ResultButtons } from "@/components/ResultButtons";
 import { SearchBox } from "@/components/SearchBox";
 import { Empty, PageHeader, PlayerLink, RatingDelta, Section } from "@/components/ui";
 
@@ -48,6 +49,8 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
     const tr = g.tournamentId ? tournaments.get(g.tournamentId) : null;
     return {
       tr,
+      /** The admin corrects friendlies here; tournament and club-night boards have their own pages. */
+      fix: admin && !g.tournamentId && !g.sessionId,
       ww: g.result === "1-0" || g.result === "+/-",
       bw: g.result === "0-1" || g.result === "-/+",
       wn: names.get(g.whiteId)?.name ?? "?",
@@ -127,7 +130,11 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
                         <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} />
                         <PlayerLink id={g.whiteId} name={r.wn} className="truncate" />
                       </span>
-                      <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
+                      {r.fix ? (
+                        <ResultButtons gameId={g.id} current={g.result} names={{ white: r.wn, black: r.bn }} allowClear={false} />
+                      ) : (
+                        <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
+                      )}
                       <span className={`flex items-center gap-1.5 min-w-0 ${r.bw ? "font-semibold" : r.ww ? "text-muted" : ""}`}>
                         <PlayerLink id={g.blackId} name={r.bn} className="truncate" />
                         <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} />
@@ -169,8 +176,12 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
                           <PlayerLink id={g.whiteId} name={r.wn} />
                           <span className="text-xs text-muted font-mono ml-1.5">{g.whiteRatingBefore}</span>
                         </td>
-                        <td className="text-center">
-                          <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
+                        <td className="text-center nowrap">
+                          {r.fix ? (
+                            <ResultButtons gameId={g.id} current={g.result} names={{ white: r.wn, black: r.bn }} allowClear={false} />
+                          ) : (
+                            <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
+                          )}
                         </td>
                         <td className={`nowrap ${r.bw ? "font-semibold" : r.ww ? "text-muted" : ""}`}>
                           <span className="text-xs text-muted font-mono mr-1.5">{g.blackRatingBefore}</span>

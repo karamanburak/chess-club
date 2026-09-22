@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { getT } from "@/lib/lang";
-import { history, involves, pendingFor, sentBy, upcoming } from "@/lib/challenges";
+import { effectiveStatus, history, involves, pendingFor, sentBy, upcoming } from "@/lib/challenges";
 import { playerMap } from "@/lib/queries";
 import { ChallengeCard, ChallengeForm } from "@/components/ChallengeCard";
 import { GuestNotice } from "@/components/GuestNotice";
@@ -24,7 +24,8 @@ export default async function ChallengesPage() {
   const names = playerMap(db);
   const m = t.challenges;
 
-  const card = (c: (typeof db.challenges)[number]) => <ChallengeCard key={c.id} c={c} names={names} me={me} admin={admin} t={t} lang={lang} clubName={db.settings.club.name} />;
+  const games = new Map(db.games.map((g) => [g.id, g]));
+  const card = (c: (typeof db.challenges)[number]) => <ChallengeCard key={c.id} c={c} names={names} me={me} admin={admin} t={t} lang={lang} clubName={db.settings.club.name} games={games} />;
   // Everyone sees what the club has agreed on (the home page shows it too); the personal lists need a claimed device.
   const all = upcoming(db);
   const mine = me ? all.filter((c) => involves(c, me)) : admin ? all : [];
@@ -48,7 +49,9 @@ export default async function ChallengesPage() {
 
   const toAnswer = me ? pendingFor(db, me) : db.challenges.filter((c) => c.status === "pending");
   const sent = me ? sentBy(db, me) : [];
-  const past = me ? history(db, me).slice(0, 20) : [];
+  const settled = me ? history(db, me) : [];
+  const played = settled.filter((c) => effectiveStatus(c) === "played").slice(0, 10);
+  const quiet = settled.filter((c) => effectiveStatus(c) !== "played").slice(0, 10);
 
   return (
     <>
@@ -76,9 +79,14 @@ export default async function ChallengesPage() {
           <Section title={m.new}>
             <ChallengeForm players={db.players} me={me} admin={admin} t={t} />
           </Section>
-          {past.length > 0 && (
-            <Section title={m.history}>
-              <ul className="flex flex-col gap-3">{past.map(card)}</ul>
+          {played.length > 0 && (
+            <Section title={m.playedTitle}>
+              <ul className="flex flex-col gap-3">{played.map(card)}</ul>
+            </Section>
+          )}
+          {quiet.length > 0 && (
+            <Section title={m.settledTitle}>
+              <ul className="flex flex-col gap-2">{quiet.map(card)}</ul>
             </Section>
           )}
         </div>

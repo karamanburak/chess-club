@@ -24,6 +24,7 @@ export function ResultButtons({
   size = "sm",
   names,
   allowSwap,
+  allowClear = true,
 }: {
   gameId: string;
   current: GameResult | null;
@@ -32,6 +33,8 @@ export function ResultButtons({
   /** Used for the toast text. */
   names?: { white: string; black: string };
   allowSwap?: boolean;
+  /** False for friendlies: a recorded game keeps a result, clicking the active one does nothing. */
+  allowClear?: boolean;
 }) {
   const [value, setOptimistic] = useOptimistic(current);
   const [pending, start] = useTransition();
@@ -43,6 +46,7 @@ export function ResultButtons({
     const prev = value;
     const target = value === next ? null : next;
     setMenu(false);
+    if (target === null && !allowClear) return;
     start(async () => {
       setOptimistic(target);
       const res = await setGameResult(gameId, target);
@@ -76,7 +80,7 @@ export function ResultButtons({
             key={o.value}
             type="button"
             disabled={disabled}
-            title={active ? t.pairing.clickToClear : t.pairing[o.title]}
+            title={active && allowClear ? t.pairing.clickToClear : t.pairing[o.title]}
             onClick={() => choose(o.value)}
             className={`font-mono font-medium border transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${base} ${
               active
@@ -125,7 +129,7 @@ export function ResultButtons({
                 <span className="text-muted">{t.pairing.swapColors}</span>
               </button>
             )}
-            {value && (
+            {value && allowClear && (
               <button type="button" className="btn btn-sm btn-ghost justify-start" onClick={() => choose(null)}>
                 <span className="w-10 text-left">×</span>
                 <span className="text-muted">{t.pairing.clearResult}</span>

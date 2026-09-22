@@ -1,3 +1,4 @@
+import { localDay } from "./time";
 import type { Lang } from "./i18n";
 /** Famous words about the game. One is shown per calendar day, everywhere the club speaks for itself. */
 export interface Quote {
@@ -53,9 +54,10 @@ export const QUOTES: readonly Quote[] = [
   { text: "There are two types of sacrifices: correct ones, and mine.", de: "Es gibt zwei Arten von Opfern: korrekte und meine.", by: "Mikhail Tal" },
 ];
 
-/** Local calendar day → index into QUOTES, so the quote changes at midnight and never within a day. */
+/** Club calendar day → index into QUOTES, so the quote changes at Berlin midnight and never within a day. */
 export function dayNumber(now: Date = new Date()): number {
-  return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400_000);
+  const [y, m, d] = localDay(now).split("-").map(Number);
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400_000);
 }
 
 export function quoteOfTheDay(now: Date = new Date()): Quote {

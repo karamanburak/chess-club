@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot } from "./db";
 import { mergeCheck, mergePlayers as mergeRecords, type MergeProblem } from "./merge";
@@ -35,6 +36,9 @@ import { applyReset, isResetScope, type ResetScope } from "./reset";
 import { SKIP_COOKIE, SKIP_DAYS } from "./tokens";
 import { fmt, isLang, LANG_COOKIE, type Dict, type Lang } from "./i18n";
 import { getT } from "./lang";
+import { ntfyTopic, sendNotifications, type Notification } from "./notify";
+import { requestOrigin } from "./request-url";
+import { dayOf, localDay, zonedToUtc } from "./time";
 import { currentSeason, seasonTable } from "./club";
 import type { Database, Game, GameResult, PairingMode, TiebreakKey, Tournament } from "./types";
 
@@ -68,7 +72,36 @@ function revalidateAll() {
 /* Action plumbing: user-facing errors, activity log                   */
 /* ------------------------------------------------------------------ */
 
-const actor = new AsyncLocalStorage<{ admin: boolean; owner?: boolean }>();
+interface Actor {
+  admin: boolean;
+  owner?: boolean;
+  /** Address the request came in on, for the "tap to open" link of phone notifications. */
+  origin: string;
+  /** Activity lines written during this action, sent to the phone once the action is through. */
+  notes: Notification[];
+}
+
+const actor = new AsyncLocalStorage<Actor>();
+
+async function beginActor(): Promise<Actor> {
+  return { admin: await isAdmin(), origin: ntfyTopic() ? await requestOrigin() : "", notes: [] };
+}
+
+/** A redirect() is a thrown signal, not a failure: the action's writes went through. */
+function isRedirect(e: unknown): boolean {
+  return typeof e === "object" && e !== null && typeof (e as { digest?: unknown }).digest === "string" && (e as { digest: string }).digest.startsWith("NEXT_REDIRECT");
+}
+
+/**
+ * Pushes this action's activity lines to the phone after the response is out. mutate() reruns its callback on a
+ * version conflict, so the same line can be queued twice: send each text once.
+ */
+function notifyPhone(a: Actor): void {
+  if (a.notes.length === 0 || !ntfyTopic()) return;
+  const seen = new Set<string>();
+  const items = a.notes.filter((n) => !seen.has(n.text) && seen.add(n.text));
+  after(() => sendNotifications(items));
+}
 
 /** Builds the URL of the page the request came from, with the message attached as a flash toast. */
 function flashUrl(referer: string | null, message: string): string {
@@ -94,10 +127,12 @@ function flashUrl(referer: string | null, message: string): string {
  */
 async function run(fn: () => void | Promise<void>): Promise<void> {
   const h = await headers();
-  const admin = await isAdmin();
+  const a = await beginActor();
   try {
-    await actor.run({ admin }, fn);
+    await actor.run(a, fn);
+    notifyPhone(a);
   } catch (e) {
+    if (e instanceof UserError || isRedirect(e)) notifyPhone(a);
     if (e instanceof UserError) redirect(flashUrl(h.get("referer"), e.message));
     throw e;
   }
@@ -105,11 +140,13 @@ async function run(fn: () => void | Promise<void>): Promise<void> {
 
 /** Like run(), for actions called directly from client components: the error is returned instead of redirecting. */
 async function attempt(fn: () => void | Promise<void>): Promise<{ error?: string }> {
-  const admin = await isAdmin();
+  const a = await beginActor();
   try {
-    await actor.run({ admin }, fn);
+    await actor.run(a, fn);
+    notifyPhone(a);
     return {};
   } catch (e) {
+    if (e instanceof UserError || isRedirect(e)) notifyPhone(a);
     if (e instanceof UserError) return { error: e.message };
     throw e;
   }
@@ -117,11 +154,16 @@ async function attempt(fn: () => void | Promise<void>): Promise<{ error?: string
 
 const LOG_KEEP = 500;
 
-/** Appends a line to the activity log. Must be called inside the mutate() that persists the change. */
+/**
+ * Appends a line to the activity log. Must be called inside the mutate() that persists the change.
+ * The same line is queued for the phone (see notifyPhone) when NTFY_TOPIC is set.
+ */
 function log(db: Database, text: string): void {
   const who = actor.getStore();
-  db.activity.push({ id: newId(), at: new Date().toISOString(), admin: who?.admin ?? false, text: who?.owner ? `${text} [owner]` : text });
+  const line = who?.owner ? `${text} [owner]` : text;
+  db.activity.push({ id: newId(), at: new Date().toISOString(), admin: who?.admin ?? false, text: line });
   if (db.activity.length > LOG_KEEP) db.activity.splice(0, db.activity.length - LOG_KEEP);
+  who?.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: who.origin ? `${who.origin}/admin#activity` : "" });
 }
 
 /** Who is acting: the admin may edit any game, a claimed device only its own boards. */
@@ -179,16 +221,12 @@ function whereOf(db: Database, g: Game): string {
   return "Friendly";
 }
 
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** A "YYYY-MM-DD" from a form. Empty or today means right now; an earlier day is stamped at noon so it sorts before today's games. */
+/** A "YYYY-MM-DD" from a form. Empty or today (club time) means right now; an earlier day is stamped at noon club time so it sorts before today's games. */
 function playedAt(date: string, E: Msgs): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date === localToday()) return new Date().toISOString();
-  if (date > localToday()) throw new UserError(E.dateInFuture);
-  return new Date(`${date}T12:00:00`).toISOString();
+  const today = localDay();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date === today) return new Date().toISOString();
+  if (date > today) throw new UserError(E.dateInFuture);
+  return zonedToUtc(date, "12:00") ?? new Date().toISOString();
 }
 
 function parseMode(raw: string): PairingMode {
@@ -581,7 +619,7 @@ export async function startSeason(fd: FormData) {
     const E = await msgs();
     await mutate((db) => {
       if (currentSeason(db)) throw new UserError(E.closeSeasonFirst);
-      const start = str(fd, "start") || localToday();
+      const start = str(fd, "start") || localDay();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) throw new UserError(E.seasonNeedsStart);
       const lastEnd = db.seasons.map((s) => s.end ?? "").sort().at(-1) ?? "";
       if (lastEnd && start <= lastEnd) throw new UserError(fmt(E.seasonMustStartAfter, { date: lastEnd }));
@@ -603,7 +641,7 @@ export async function closeSeason(id: string) {
       const s = db.seasons.find((x) => x.id === id);
       if (!s) return;
       if (s.end) throw new UserError(E.seasonAlreadyClosed);
-      const end = localToday();
+      const end = localDay();
       s.end = end < s.start ? s.start : end;
       const table = seasonTable(db, s);
       s.championId = table[0]?.playerId ?? null;
@@ -931,6 +969,8 @@ export async function createChallenge(fd: FormData) {
     if (!fromId) throw new UserError(E.membersOnly);
     const at = combineDateTime(str(fd, "date"), str(fd, "time"));
     if (!at) throw new UserError(E.challengePast);
+    // Where and how fast are part of the deal, not decoration: the form marks them required, the server insists.
+    if (!str(fd, "place") || !str(fd, "timeControl")) throw new UserError(E.challengeDetails);
     await mutate((db) => {
       expireChallenges(db);
       const problem = challengeCheck(db, fromId, toId, at);
@@ -947,11 +987,12 @@ export async function createChallenge(fd: FormData) {
         status: "pending",
         proposedBy: fromId,
         whiteId: null,
+        rated: str(fd, "rated") !== "off",
         gameId: null,
         createdAt: now,
         updatedAt: now,
       });
-      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${at.slice(0, 16).replace("T", " ")}`);
+      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${at.slice(0, 16).replace("T", " ")}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
     });
     revalidateAll();
   });
@@ -1043,7 +1084,8 @@ export async function recordChallengeResult(id: string, fd: FormData) {
       c.whiteId ??= drawColors(c).whiteId;
       const whiteId = c.whiteId;
       const blackId = whiteId === c.fromId ? c.toId : c.fromId;
-      const g = makeGame(db, { whiteId, blackId, rated: fd.get("rated") !== "off", tournamentId: null, round: null, board: null, sessionId: null });
+      // Rated or not was agreed when the challenge was sent, so nobody flips it at the board.
+      const g = makeGame(db, { whiteId, blackId, rated: c.rated, tournamentId: null, round: null, board: null, sessionId: null });
       g.result = result;
       // Stamp the game at the agreed time when that is in the past, otherwise now.
       const when = new Date(c.at).getTime() < Date.now() ? c.at : new Date().toISOString();
@@ -1080,7 +1122,7 @@ export async function recordFriendlyGame(fd: FormData) {
       g.createdAt = when;
       g.completedAt = when;
       db.games.push(g);
-      log(db, `Friendly game ${nameOf(db, whiteId)} – ${nameOf(db, blackId)}: ${resultLabel(result)}${g.rated ? "" : " (unrated)"}${when.slice(0, 10) !== new Date().toISOString().slice(0, 10) ? ` played ${when.slice(0, 10)}` : ""}`);
+      log(db, `Friendly game ${nameOf(db, whiteId)} – ${nameOf(db, blackId)}: ${resultLabel(result)}${g.rated ? "" : " (unrated)"}${dayOf(when) !== localDay() ? ` played ${dayOf(when)}` : ""}`);
       recomputeRatings(db);
     });
     revalidateAll();
@@ -1096,13 +1138,18 @@ export async function setGameResult(gameId: string, result: GameResult | null) {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
       if (!mayEditGame(who, g)) throw new UserError(who.me ? E.notYourGame : E.claimFirst);
+      // Friendlies (incl. challenge results) are recorded once by the players; changing them afterwards is a correction, admin only.
+      const friendly = !g.tournamentId && !g.sessionId;
+      if (friendly && !who.admin) throw new UserError(E.friendlyAdminOnly);
+      if (friendly && result === null) throw new UserError(E.friendlyNeedsResult);
       const t = g.tournamentId ? db.tournaments.find((x) => x.id === g.tournamentId) : undefined;
       if (t?.knockout && g.round !== null && g.round < t.rounds.length) {
         throw new UserError(E.knockoutRoundLocked);
       }
+      const before = g.result;
       g.result = result;
       g.completedAt = result ? (g.completedAt ?? new Date().toISOString()) : null;
-      log(db, `${whereOf(db, g)}: ${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)} ${result ? resultLabel(result) : "result cleared"}`);
+      log(db, `${whereOf(db, g)}: ${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)} ${result ? resultLabel(result) : "result cleared"}${before && result && before !== result ? ` (was ${resultLabel(before)})` : ""}`);
       if (t?.knockout) syncKnockout(db, t);
       recomputeRatings(db);
     });
@@ -1140,7 +1187,14 @@ export async function deleteGame(gameId: string) {
       const g = db.games.find((x) => x.id === gameId);
       if (!g) return;
       if (g.tournamentId) throw new UserError(E.tournamentGamesViaRound);
-      log(db, `${whereOf(db, g)}: game ${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)} deleted`);
+      // A challenge whose game goes away is back to "agreed", so the result can be entered again.
+      const reopened = db.challenges.filter((c) => c.gameId === gameId);
+      for (const c of reopened) {
+        c.status = "accepted";
+        c.gameId = null;
+        c.updatedAt = new Date().toISOString();
+      }
+      log(db, `${whereOf(db, g)}: game ${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)} deleted${reopened.length ? ", challenge reopened" : ""}`);
       db.games = db.games.filter((x) => x.id !== gameId);
       for (const s of db.sessions) for (const r of s.rounds) r.pairings = r.pairings.filter((p) => p.gameId !== gameId);
       recomputeRatings(db);
@@ -1165,7 +1219,7 @@ export async function createTournament(fd: FormData) {
       const t: Tournament = {
         id,
         name,
-        date: str(fd, "date") || new Date().toISOString().slice(0, 10),
+        date: str(fd, "date") || localDay(),
         status: "planned",
         pairingMode: mode,
         plannedRounds: Math.max(1, Math.round(num(fd, "plannedRounds", 5))),
@@ -1637,7 +1691,7 @@ export async function sessionDelete(id: string) {
   return run(async () => {
     await requireAdmin();
     await mutate((db) => {
-      log(db, `Club night of ${db.sessions.find((s) => s.id === id)?.createdAt.slice(0, 10) ?? "?"} deleted`);
+      log(db, `Club night of ${dayOf(db.sessions.find((s) => s.id === id)?.createdAt ?? "?")} deleted`);
       db.sessions = db.sessions.filter((s) => s.id !== id);
       db.games = db.games.filter((g) => g.sessionId !== id);
       recomputeRatings(db);

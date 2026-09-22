@@ -85,7 +85,8 @@ describe("seasons", () => {
     const d = db([player("a"), player("b"), player("c")], [
       game("a", "b", "1-0", { completedAt: "2026-01-02T12:00:00.000Z" }), // before
       game("a", "b", "1-0", { completedAt: "2026-01-03T12:00:00.000Z" }),
-      game("b", "c", "1/2-1/2", { completedAt: "2026-01-05T23:00:00.000Z" }), // last day counts
+      game("b", "c", "1/2-1/2", { completedAt: "2026-01-05T21:00:00.000Z" }), // 22:00 Berlin on the last day counts
+      game("b", "c", "1-0", { completedAt: "2026-01-05T23:30:00.000Z" }), // 00:30 Berlin on the 6th: after
       game("c", "a", "1-0", { completedAt: "2026-01-06T12:00:00.000Z" }), // after
       game("a", "c", "+/-", { completedAt: "2026-01-04T12:00:00.000Z" }), // forfeit never counts
     ]);

@@ -21,10 +21,11 @@ describe("quote of the day", () => {
     expect(localizedQuote(QUOTES[0], "en")).toEqual({ text: QUOTES[0].text, by: QUOTES[0].by });
   });
 
-  test("stays the same all day and changes at midnight", () => {
-    const morning = new Date(2026, 8, 14, 7, 0);
-    const night = new Date(2026, 8, 14, 23, 59);
-    const tomorrow = new Date(2026, 8, 15, 0, 1);
+  test("stays the same all day and changes at Berlin midnight", () => {
+    // Berlin is UTC+2 in September: 21:59Z is still the 14th there, 22:01Z is already the 15th
+    const morning = new Date("2026-09-14T05:00:00Z");
+    const night = new Date("2026-09-14T21:59:00Z");
+    const tomorrow = new Date("2026-09-14T22:01:00Z");
     expect(quoteOfTheDay(morning)).toEqual(quoteOfTheDay(night));
     expect(dayNumber(tomorrow)).toBe(dayNumber(morning) + 1);
     expect(quoteOfTheDay(tomorrow)).not.toEqual(quoteOfTheDay(morning));

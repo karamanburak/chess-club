@@ -1,4 +1,5 @@
 import { BACKUP_NAME_RE, readBackup, readDb } from "@/lib/db";
+import { localDay } from "@/lib/time";
 import { isAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export async function GET(req: Request) {
     name = snapshot;
   } else {
     body = JSON.stringify(await readDb(), null, 2);
-    name = `chess-club-${new Date().toISOString().slice(0, 10)}.json`;
+    name = `chess-club-${localDay()}.json`;
   }
   return new Response(body, {
     headers: {

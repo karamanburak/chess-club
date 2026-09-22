@@ -1,4 +1,5 @@
 import { fmt, plural, type Dict } from "./i18n";
+import { dayOf, daysFromToday, localDay } from "./time";
 /**
  * The "club life" layer: titles by rating band, achievements, seasons with
  * their own table and champion, tournament winners and home-page highlights.
@@ -224,7 +225,7 @@ export function currentSeason(db: Database): Season | null {
  * probably just forgotten: the admin should close it so the champion gets crowned.
  * Returns the number of months it has been running, or null when it is fine.
  */
-export function seasonOverdue(season: Season, today = new Date().toISOString().slice(0, 10)): number | null {
+export function seasonOverdue(season: Season, today = localDay()): number | null {
   if (season.end) return null;
   const startYear = Number(season.start.slice(0, 4));
   const todayYear = Number(today.slice(0, 4));
@@ -252,7 +253,7 @@ export interface SeasonRow {
 
 function inSeason(at: string | null, s: Season): at is string {
   if (!at) return false;
-  const day = at.slice(0, 10);
+  const day = dayOf(at);
   return day >= s.start && (s.end === null || day <= s.end);
 }
 
@@ -392,9 +393,5 @@ export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"
 
 /** Days until an ISO date (negative when past), or null when empty. */
 export function daysUntil(iso: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const today = new Date();
-  const a = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  const [y, m, d] = iso.split("-").map(Number);
-  return Math.round((Date.UTC(y, m - 1, d) - a) / 86400_000);
+  return daysFromToday(iso);
 }

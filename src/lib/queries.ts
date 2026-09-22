@@ -1,4 +1,5 @@
 import type { ClubSession, Database, Game, GameResult, Player, TiebreakKey, Tournament } from "./types";
+import { clubTimeZone, localMonth } from "./time";
 import { fmt, localeOf, type Dict, type Lang } from "./i18n";
 import { tournaments as tournamentMessages } from "./i18n/messages/tournaments";
 import { EMPTY_COLOR, pairKey, type ColorStats } from "./pairing";
@@ -573,7 +574,7 @@ export function clubStats(db: Database): ClubStats {
       const diff = loserBefore - winnerBefore;
       if (diff > 0 && (!biggestUpset || diff > biggestUpset.diff)) biggestUpset = { game: g, diff };
     }
-    const month = g.completedAt.slice(0, 7);
+    const month = localMonth(new Date(g.completedAt));
     monthMap.set(month, (monthMap.get(month) ?? 0) + 1);
     for (const [id, after] of [
       [g.whiteId, g.whiteRatingAfter],
@@ -620,7 +621,7 @@ export interface MonthRow {
 
 export function monthsWithGames(db: Database): string[] {
   const set = new Set<string>();
-  for (const g of db.games) if (g.completedAt) set.add(g.completedAt.slice(0, 7));
+  for (const g of db.games) if (g.completedAt) set.add(localMonth(new Date(g.completedAt)));
   return [...set].sort().reverse();
 }
 
@@ -667,21 +668,22 @@ export function scoreLabel(score: number | null | undefined): string {
   return String(score);
 }
 
+/** Dates are shown in club time (see time.ts), not in the server's zone: Vercel runs in UTC. */
 export function formatDate(iso: string, lang: Lang = "en"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" });
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric", timeZone: clubTimeZone() });
 }
 
 export function formatDateTime(iso: string, lang: Lang = "en"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(localeOf(lang), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(localeOf(lang), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: clubTimeZone() });
 }
 
 export function formatMonth(ym: string, lang: Lang = "en"): string {
   const [y, m] = ym.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString(localeOf(lang), { month: "long", year: "numeric" });
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(localeOf(lang), { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 /* ------------------------------------------------------------------ */

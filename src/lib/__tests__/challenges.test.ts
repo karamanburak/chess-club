@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { awaitsAnswerFrom, challengeCheck, combineDateTime, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, sentBy, toIcs, upcoming } from "../challenges";
-import { db, player } from "./fixtures";
+import { awaitsAnswerFrom, challengeCheck, combineDateTime, playedSummary, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, sentBy, toIcs, upcoming } from "../challenges";
+import { db, game, player } from "./fixtures";
 import type { Challenge } from "../types";
 
 const NOW = Date.parse("2026-09-18T10:00:00Z");
@@ -18,6 +18,7 @@ function challenge(over: Partial<Challenge>): Challenge {
     status: "pending",
     proposedBy: "a",
     whiteId: null,
+    rated: true,
     gameId: null,
     createdAt: hours(-1),
     updatedAt: hours(-1),
@@ -69,6 +70,8 @@ describe("challengeCheck", () => {
     expect(challengeCheck(d, "a", "zz", hours(1), NOW)).toBe("notFound");
     expect(challengeCheck(d, "a", "c", hours(1), NOW)).toBe("inactive");
     expect(challengeCheck(d, "a", "b", hours(-1), NOW)).toBe("past");
+    // "right now" is stamped a moment before the check runs and phones' clocks drift: a few minutes back is fine
+    expect(challengeCheck(d, "a", "b", new Date(NOW - 5 * 60_000).toISOString(), NOW)).toBeNull();
     expect(challengeCheck(d, "a", "b", "nonsense", NOW)).toBe("past");
     expect(challengeCheck(d, "a", "b", hours(1), NOW)).toBeNull();
     d.challenges = [challenge({ fromId: "b", toId: "a", proposedBy: "b" })];
@@ -119,7 +122,8 @@ describe("googleCalendarUrl", () => {
 
 describe("combineDateTime / toIcs", () => {
   test("form fields combine into an ISO stamp and reject garbage", () => {
-    expect(combineDateTime("2026-09-20", "18:30")).toMatch(/^2026-09-2\dT\d{2}:\d{2}:00\.000Z$/);
+    // 18:30 Berlin summer time is 16:30 UTC, whatever zone the server runs in
+    expect(combineDateTime("2026-09-20", "18:30")).toBe("2026-09-20T16:30:00.000Z");
     expect(combineDateTime("20.09.2026", "18:30")).toBeNull();
     expect(combineDateTime("2026-09-20", "6pm")).toBeNull();
   });
@@ -133,5 +137,26 @@ describe("combineDateTime / toIcs", () => {
     expect(ics).toContain("LOCATION:Room 3.14");
     expect(ics).toContain("DESCRIPTION:Anna – Berk\\nBedenkzeit 15+10\\nBring a clock");
     expect(ics.split("\r\n").every((l) => !l.includes("\n"))).toBe(true);
+  });
+});
+
+describe("playedSummary", () => {
+  const g = game("a", "b", "1-0", { whiteRatingBefore: 1500, whiteRatingAfter: 1507, blackRatingBefore: 1400, blackRatingAfter: 1393 });
+
+  test("tells each side how it went and how many points moved", () => {
+    expect(playedSummary(g, "a")).toEqual({ outcome: "won", delta: 7 });
+    expect(playedSummary(g, "b")).toEqual({ outcome: "lost", delta: -7 });
+  });
+
+  test("a draw is a draw, a forfeit counts as won or lost, an unrated game moves nothing", () => {
+    expect(playedSummary(game("a", "b", "1/2-1/2", { whiteRatingBefore: 1500, whiteRatingAfter: 1500 }), "a")).toEqual({ outcome: "draw", delta: 0 });
+    expect(playedSummary(game("a", "b", "-/+", { rated: false }), "a")).toEqual({ outcome: "lost", delta: null });
+    expect(playedSummary(game("a", "b", "1-0", { rated: false }), "b")).toEqual({ outcome: "lost", delta: null });
+  });
+
+  test("an onlooker or a guest gets no verdict", () => {
+    expect(playedSummary(g, "c")).toEqual({ outcome: null, delta: null });
+    expect(playedSummary(g, null)).toEqual({ outcome: null, delta: null });
+    expect(playedSummary(game("a", "b", null), "a")).toEqual({ outcome: null, delta: null });
   });
 });

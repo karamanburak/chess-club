@@ -262,6 +262,10 @@ const en = {
   // activity
   activity: {
     title: "Recent activity",
+    pushOn: "Phone: on",
+    pushOnHint: "Every line here is also pushed to the ntfy topic {topic}. Set NTFY_TOPIC empty to stop.",
+    pushOff: "Phone: off",
+    pushOffHint: "Set NTFY_TOPIC in the server environment and subscribe to that topic in the ntfy app to get every line here as a phone notification.",
     lastOf: "last {n} of {total}",
     matching: "{n} of {total} match",
     empty: "Nothing logged yet. Every result, pairing and edit shows up here.",
@@ -547,6 +551,10 @@ const de: typeof en = {
   },
   activity: {
     title: "Aktivitätsprotokoll",
+    pushOn: "Handy: an",
+    pushOnHint: "Jede Zeile hier geht auch an das ntfy-Thema {topic}. NTFY_TOPIC leeren, um es abzustellen.",
+    pushOff: "Handy: aus",
+    pushOffHint: "Setze NTFY_TOPIC in der Server-Umgebung und abonniere das Thema in der ntfy-App, um jede Zeile hier als Handy-Benachrichtigung zu bekommen.",
     lastOf: "letzte {n} von {total}",
     matching: "{n} von {total} passen",
     empty: "Noch nichts protokolliert. Jedes Ergebnis, jede Auslosung und jede Änderung erscheint hier.",

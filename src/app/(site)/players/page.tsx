@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { localDay } from "@/lib/time";
 import { Icon } from "@/components/icons";
 import { Suspense } from "react";
 import { readDb } from "@/lib/db";
@@ -25,8 +26,7 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
   const all = leaderboard(db, true);
   const players = q ? all.filter((p) => p.name.toLowerCase().includes(q)) : all;
   const active = all.filter((p) => p.active);
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const today = localDay();
 
   return (
     <>

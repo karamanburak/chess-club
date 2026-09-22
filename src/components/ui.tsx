@@ -3,7 +3,8 @@ import { cache, type ReactNode } from "react";
 import { readDb } from "@/lib/db";
 import { PROVISIONAL_GAMES } from "@/lib/elo";
 import { getT } from "@/lib/lang";
-import { fmt, localeOf, plural } from "@/lib/i18n";
+import { fmt, plural } from "@/lib/i18n";
+import { formatDate } from "@/lib/queries";
 import { FaceSvg } from "./Face";
 import { Icon, type IconName } from "./icons";
 import type { Achievement, Title } from "@/lib/club";
@@ -210,7 +211,7 @@ export async function TitleBadge({ title, compact = false }: { title: Title | nu
 export async function AchievementChip({ a, size = "sm" }: { a: Achievement; size?: "sm" | "lg" }) {
   const { t, lang } = await getT();
   const earned = !!a.earnedAt;
-  const when = a.earnedAt ? new Date(a.earnedAt).toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" }) : null;
+  const when = a.earnedAt ? formatDate(a.earnedAt, lang) : null;
   const text = t.club.achievements[a.key as keyof typeof t.club.achievements] ?? { label: a.label, description: a.description };
   return (
     <span

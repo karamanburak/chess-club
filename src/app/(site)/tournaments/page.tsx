@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { localDay } from "@/lib/time";
 import { readDb } from "@/lib/db";
 import { isMemberDevice } from "@/lib/auth";
 import { GuestNotice } from "@/components/GuestNotice";
@@ -86,7 +87,7 @@ export default async function TournamentsPage() {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="label">{msg.tournaments.form.date}</label>
-                <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="w-full" />
+                <input name="date" type="date" defaultValue={localDay()} className="w-full" />
               </div>
               <div className={`transition-opacity [form:has(input[name=pairingMode][value=roundrobin]:checked)_&]:opacity-50 [form:has(input[name=pairingMode][value=knockout]:checked)_&]:opacity-50`} title={msg.tournaments.form.roundsAuto}>
                 <label className="label">{msg.tournaments.form.rounds}</label>

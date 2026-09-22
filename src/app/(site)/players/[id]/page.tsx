@@ -33,6 +33,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
 
   const names = playerMap(db);
   const games = gamesForPlayer(db, player.id);
+  const gameById = new Map(db.games.map((g) => [g.id, g]));
   const history = ratingHistory(db, player);
   const colors = colorStats(db).get(player.id) ?? { white: 0, black: 0, last: null, streak: 0 };
   const tournaments = new Map(db.tournaments.map((t) => [t.id, t]));
@@ -225,7 +226,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                 {theirUpcoming.length > 0 && (
                   <ul className="flex flex-col gap-3">
                     {theirUpcoming.slice(0, 3).map((c) => (
-                      <ChallengeCard key={c.id} c={c} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} />
+                      <ChallengeCard key={c.id} c={c} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} games={gameById} />
                     ))}
                   </ul>
                 )}
@@ -237,7 +238,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                 )}
                 {between && !theirUpcoming.some((c) => c.id === between.id) && (
                   <ul className="flex flex-col gap-3">
-                    <ChallengeCard c={between} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} />
+                    <ChallengeCard c={between} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} games={gameById} />
                   </ul>
                 )}
                 {!member && <p className="text-xs text-muted">{msg.challenges.guest}</p>}

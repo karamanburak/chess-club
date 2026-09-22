@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { answerChallenge, cancelChallenge, createChallenge, proposeChallengeTime, recordChallengeResult } from "@/lib/actions";
-import { effectiveStatus, googleCalendarUrl, isToday } from "@/lib/challenges";
+import { effectiveStatus, googleCalendarUrl, isToday, playedSummary, SETTLED_QUIET } from "@/lib/challenges";
 import { fmt, type Dict, type Lang } from "@/lib/i18n";
-import { formatDateTime } from "@/lib/queries";
-import type { Challenge, Player } from "@/lib/types";
+import { formatDateTime, resultLabel } from "@/lib/queries";
+import { localDay, localTime } from "@/lib/time";
+import type { Challenge, Game, Player } from "@/lib/types";
 import { ConfirmButton } from "./ConfirmButton";
+import { ResultButtons } from "./ResultButtons";
+import { NowButton } from "./NowButton";
 import { Icon } from "./icons";
 import { SubmitButton } from "./SubmitButton";
 import { Avatar, ColorDot, Pill, PlayerLink } from "./ui";
@@ -14,19 +17,38 @@ import { Avatar, ColorDot, Pill, PlayerLink } from "./ui";
  * withdraw or suggest another time when they are involved, enter the result once agreed.
  * `me` is the viewing player (null for admin-only or guests); `admin` unlocks everything.
  */
-export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "" }: { c: Challenge; names: Map<string, Player>; me: string | null; admin: boolean; t: Dict; lang: Lang; clubName?: string }) {
+export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", games }: { c: Challenge; names: Map<string, Player>; me: string | null; admin: boolean; t: Dict; lang: Lang; clubName?: string; games?: Map<string, Game> }) {
   const m = t.challenges;
   const status = effectiveStatus(c);
+  const game = status === "played" && c.gameId ? games?.get(c.gameId) ?? null : null;
+  const played = game ? playedSummary(game, me) : null;
   const involved = admin || (!!me && (c.fromId === me || c.toId === me));
   const myTurn = status === "pending" && (admin || (!!me && c.proposedBy !== me));
   const from = names.get(c.fromId);
   const to = names.get(c.toId);
   const other = me === c.fromId ? to : me === c.toId ? from : null;
-  const tone = status === "accepted" ? "win" : status === "pending" ? "accent" : status === "played" ? "muted" : "loss";
-  const label = m[status];
+  const tone = played?.outcome ? ({ won: "win", lost: "loss", draw: "muted" } as const)[played.outcome] : status === "accepted" ? "win" : status === "pending" ? "accent" : status === "played" ? "muted" : "loss";
+  const label = played?.outcome ? m[played.outcome] : m[status];
   const today = status === "accepted" && isToday(c.at);
-  const dateInput = c.at.slice(0, 10);
-  const timeInput = new Date(c.at).toTimeString().slice(0, 5);
+  const dateInput = localDay(new Date(c.at));
+  const timeInput = localTime(new Date(c.at));
+
+  // Nothing came of it: one quiet line, so the games that were played stand out in the same list.
+  if (SETTLED_QUIET.includes(status)) {
+    return (
+      <li className="flex items-center justify-between gap-3 rounded-xl border border-line/60 px-3 py-2 text-sm text-muted">
+        <span className="flex items-center gap-2 min-w-0">
+          <Avatar id={c.fromId} name={from?.name ?? "?"} size="sm" />
+          <Avatar id={c.toId} name={to?.name ?? "?"} size="sm" />
+          <span className="truncate">
+            {other ? fmt(m.vs, { name: other.name }) : `${from?.name ?? "?"} – ${to?.name ?? "?"}`}
+            <span className="text-xs"> · {formatDateTime(c.at, lang)}</span>
+          </span>
+        </span>
+        <Pill tone="muted">{label}</Pill>
+      </li>
+    );
+  }
 
   return (
     <li className={`card flex flex-col gap-3 ${today ? "border-accent/50 bg-accent/5" : ""}`}>
@@ -50,13 +72,33 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "" }: {
             </div>
           </div>
         </div>
-        <Pill tone={tone}>{label}</Pill>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Pill tone={c.rated ? "accent" : "muted"}>{c.rated ? m.ratedShort : t.common.unrated}</Pill>
+          <Pill tone={tone}>{label}</Pill>
+        </span>
       </div>
-      {c.whiteId && (status === "accepted" || status === "played") && (
-        <p className="flex items-center gap-2 text-xs text-muted">
-          <ColorDot color="white" /> {names.get(c.whiteId)?.name}
-          <ColorDot color="black" /> {names.get(c.whiteId === c.fromId ? c.toId : c.fromId)?.name}
+      {game ? (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span className="flex items-center gap-2">
+            <ColorDot color="white" /> {names.get(game.whiteId)?.name ?? "?"}
+            <span className="font-mono font-semibold">{resultLabel(game.result)}</span>
+            {names.get(game.blackId)?.name ?? "?"} <ColorDot color="black" />
+          </span>
+          {played?.delta !== null && played?.delta !== undefined && (
+            <span className={`font-mono text-xs ${played.delta > 0 ? "text-win" : played.delta < 0 ? "text-loss" : "text-muted"}`} title={m.ratingChange}>
+              {played.delta > 0 ? `+${played.delta}` : played.delta}
+            </span>
+          )}
+          {!game.rated && <span className="text-xs text-muted">({t.common.unrated})</span>}
         </p>
+      ) : (
+        c.whiteId &&
+        (status === "accepted" || status === "played") && (
+          <p className="flex items-center gap-2 text-xs text-muted">
+            <ColorDot color="white" /> {names.get(c.whiteId)?.name}
+            <ColorDot color="black" /> {names.get(c.whiteId === c.fromId ? c.toId : c.fromId)?.name}
+          </p>
+        )
       )}
       {c.note && <p className="text-sm text-muted">{c.note}</p>}
       {status === "pending" && c.proposedBy !== c.fromId && (
@@ -133,10 +175,7 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "" }: {
                     </label>
                   ))}
                 </div>
-                <label className="flex items-center gap-2 text-xs text-muted">
-                  <input type="checkbox" name="rated" value="on" defaultChecked /> {t.common.rated}
-                </label>
-                <input type="hidden" name="rated" value="off" />
+                <p className="text-xs text-muted">{c.rated ? m.ratedOn : m.ratedOff}</p>
                 <SubmitButton className="btn btn-primary btn-sm self-start" pendingText={t.common.saving}>
                   {m.save}
                 </SubmitButton>
@@ -151,9 +190,20 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "" }: {
         </div>
       )}
       {status === "played" && c.gameId && (
-        <Link href="/games" className="text-xs text-muted hover:text-accent">
-          {t.games.title} →
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Link href={`/games?kind=friendly${other ? `&q=${encodeURIComponent(other.name)}` : ""}`} className="text-xs text-muted hover:text-accent">
+            {m.openGames} →
+          </Link>
+          {admin && game && (
+            <details className="group no-print">
+              <summary className="btn btn-sm btn-ghost cursor-pointer list-none text-muted">{m.correctResult}</summary>
+              <div className="mt-2 flex flex-col gap-2 rounded-xl border border-line bg-panel-2/40 p-3 text-xs text-muted">
+                <span>{fmt(m.correctResultHint, { white: names.get(game.whiteId)?.name ?? "?", black: names.get(game.blackId)?.name ?? "?" })}</span>
+                <ResultButtons gameId={game.id} current={game.result} names={{ white: names.get(game.whiteId)?.name ?? "?", black: names.get(game.blackId)?.name ?? "?" }} allowClear={false} />
+              </div>
+            </details>
+          )}
+        </div>
       )}
     </li>
   );
@@ -163,9 +213,7 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "" }: {
 export function ChallengeForm({ players, me, admin, toId, t }: { players: Player[]; me: string | null; admin: boolean; toId?: string; t: Dict }) {
   const m = t.challenges;
   const others = players.filter((p) => p.active && p.id !== me);
-  const tomorrowDate = new Date();
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = tomorrowDate.toISOString().slice(0, 10);
+  const today = localDay();
   return (
     <form action={createChallenge} className="flex flex-col gap-3 text-sm">
       {admin && !me && (
@@ -197,30 +245,44 @@ export function ChallengeForm({ players, me, admin, toId, t }: { players: Player
           </select>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">{m.date}</label>
-          <input name="date" type="date" required defaultValue={tomorrow} className="w-full" />
+      <div>
+        <div className="flex items-end justify-between gap-2">
+          <label className="label">{m.when}</label>
+          <NowButton label={m.now} title={m.nowHint} className="btn btn-sm btn-ghost -mb-1 text-xs text-muted hover:text-accent" />
         </div>
-        <div>
-          <label className="label">{m.time}</label>
-          <input name="time" type="time" required defaultValue="18:00" className="w-full" />
+        <div className="grid grid-cols-2 gap-3">
+          <input name="date" type="date" required defaultValue={today} className="w-full" aria-label={m.date} />
+          <input name="time" type="time" required defaultValue="18:00" className="w-full" aria-label={m.time} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="label">{m.place}</label>
-          <input name="place" maxLength={80} placeholder={m.placePlaceholder} className="w-full" />
+          <input name="place" required maxLength={80} placeholder={m.placePlaceholder} className="w-full" />
         </div>
         <div>
           <label className="label">{m.timeControl}</label>
-          <input name="timeControl" maxLength={20} placeholder="15+10" list="tc-challenge" className="w-full" />
+          <input name="timeControl" required maxLength={20} placeholder="15+10" list="tc-challenge" className="w-full" />
           <datalist id="tc-challenge">
             <option value="5+3" />
             <option value="10+0" />
             <option value="15+10" />
             <option value="25+10" />
           </datalist>
+        </div>
+      </div>
+      <div>
+        <label className="label">{m.ratedLabel}</label>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            ["on", m.ratedOn],
+            ["off", m.ratedOff],
+          ].map(([v, l], i) => (
+            <label key={v} className="chip justify-center text-xs">
+              <input type="radio" name="rated" value={v} defaultChecked={i === 0} className="sr-only" />
+              {l}
+            </label>
+          ))}
         </div>
       </div>
       <div>

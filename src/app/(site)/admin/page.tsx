@@ -7,6 +7,8 @@ import { changePassword, clearMemberCode, closeSeason, createSnapshot, importDat
 import { currentSeason, seasonTable, seasonOverdue } from "@/lib/club";
 import { RESET_SCOPES, resetCounts } from "@/lib/reset";
 import { requestOrigin } from "@/lib/request-url";
+import { ntfyLabel } from "@/lib/notify";
+import { localDay } from "@/lib/time";
 import { checkHealth } from "@/lib/health";
 import { Qr } from "@/components/Qr";
 import { formatDate, playerMap } from "@/lib/queries";
@@ -211,6 +213,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const filtering = q !== "" || who !== "";
   const matching = [...db.activity].reverse().filter((x) => (who === "" || (who === "admin") === x.admin) && (q === "" || x.text.toLowerCase().includes(q.toLowerCase())));
   const activity = showAll ? matching : matching.slice(0, ACTIVITY_PREVIEW);
+  const ntfy = ntfyLabel();
   const activityQuery = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
     p.set("tab", "security");
@@ -239,7 +242,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const seasonTop = season ? seasonTable(db, season)[0] : null;
   const pastSeasons = db.seasons.filter((s) => s.end).sort((a, b) => b.start.localeCompare(a.start));
   const names = playerMap(db);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDay();
   const presetKey = TIEBREAK_PRESETS.find((p) => p.order.join() === db.settings.defaultTiebreaks.join())?.key ?? "club";
   const presetLabel = (key: string, fallback: string) => (key in a.settings.tiebreakPresets ? a.settings.tiebreakPresets[key as keyof typeof a.settings.tiebreakPresets] : fallback);
 
@@ -697,7 +700,16 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               title={<span id="activity">{a.activity.title}</span>}
               flush
               right={
-                <span className="text-xs text-muted">
+                <span className="flex items-center gap-2 text-xs text-muted">
+                  {ntfy ? (
+                    <span className="badge border-win/40 text-win" title={fmt(a.activity.pushOnHint, { topic: ntfy })}>
+                      {a.activity.pushOn}
+                    </span>
+                  ) : (
+                    <span className="badge" title={a.activity.pushOffHint}>
+                      {a.activity.pushOff}
+                    </span>
+                  )}
                   {filtering ? fmt(a.activity.matching, { n: matching.length, total: db.activity.length }) : fmt(a.activity.lastOf, { n: activity.length, total: db.activity.length })}
                 </span>
               }

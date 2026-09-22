@@ -42,6 +42,15 @@ describe("migrate", () => {
     expect(migrate(JSON.parse(JSON.stringify(raw))).players.map((p) => p.avatar)).toEqual(faces);
   });
 
+  test("challenges from before the rated choice count for Elo, newer ones keep their flag", () => {
+    const base = { fromId: "a", toId: "b", at: "2026-01-05T18:00:00.000Z", place: "", timeControl: "", note: "", status: "pending", proposedBy: "a", gameId: null, createdAt: "x", updatedAt: "x" };
+    const db = migrate({ players: [], games: [], tournaments: [], challenges: [{ ...base, id: "old" }, { ...base, id: "fun", whiteId: "a", rated: false }] });
+    expect(db.challenges.map((c) => [c.id, c.rated, c.whiteId])).toEqual([
+      ["old", true, null],
+      ["fun", false, "a"],
+    ]);
+  });
+
   test("turns a v1 quickSession into a club night with one round", () => {
     const db = migrate({
       players: [],

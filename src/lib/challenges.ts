@@ -3,7 +3,9 @@
  * actions.ts do the writes. A challenge that was never answered, or accepted but never recorded,
  * counts as expired a day after its proposed time, so nothing lingers.
  */
-import type { Challenge, ChallengeStatus, Database } from "./types";
+import type { Challenge, ChallengeStatus, Database, Game } from "./types";
+import { scoreFor } from "./elo";
+import { sameLocalDay, zonedToUtc } from "./time";
 
 export const EXPIRE_AFTER_MS = 24 * 60 * 60_000;
 export const OPEN: readonly ChallengeStatus[] = ["pending", "accepted"];
@@ -70,12 +72,38 @@ export function history(db: Database, playerId: string, now = Date.now()): Chall
   return db.challenges.filter((c) => involves(c, playerId) && !OPEN.includes(effectiveStatus(c, now))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/** Statuses whose card can shrink to one line: nothing happened, nothing to show. */
+export const SETTLED_QUIET: readonly ChallengeStatus[] = ["declined", "cancelled", "expired"];
+
+export interface PlayedSummary {
+  /** From the viewer's seat; null when the viewer did not play. */
+  outcome: "won" | "lost" | "draw" | null;
+  /** The viewer's rating change, when the game was rated and replayed. */
+  delta: number | null;
+}
+
+/** What the recorded game means for `me`: won / lost / draw and the rating points it moved. */
+export function playedSummary(g: Pick<Game, "whiteId" | "blackId" | "result" | "rated" | "whiteRatingBefore" | "whiteRatingAfter" | "blackRatingBefore" | "blackRatingAfter">, me: string | null): PlayedSummary {
+  const color = me === g.whiteId ? "white" : me === g.blackId ? "black" : null;
+  if (!color || !g.result) return { outcome: null, delta: null };
+  const score = scoreFor(g.result, color);
+  const before = color === "white" ? g.whiteRatingBefore : g.blackRatingBefore;
+  const after = color === "white" ? g.whiteRatingAfter : g.blackRatingAfter;
+  return {
+    outcome: score === 1 ? "won" : score === 0 ? "lost" : "draw",
+    delta: g.rated && before !== null && after !== null ? after - before : null,
+  };
+}
+
 /** An open challenge already exists between these two. */
 export function openBetween(db: Database, a: string, b: string, now = Date.now()): Challenge | undefined {
   return db.challenges.find((c) => OPEN.includes(effectiveStatus(c, now)) && involves(c, a) && involves(c, b));
 }
 
 export type ChallengeProblem = "self" | "notFound" | "inactive" | "past" | "exists";
+
+/** A challenge may be a little in the past: "right now" is stamped before the check runs, and clocks differ. */
+export const PAST_GRACE_MS = 15 * 60_000;
 
 export function challengeCheck(db: Database, fromId: string, toId: string, at: string, now = Date.now()): ChallengeProblem | null {
   if (fromId === toId) return "self";
@@ -84,22 +112,19 @@ export function challengeCheck(db: Database, fromId: string, toId: string, at: s
   if (!from || !to) return "notFound";
   if (!to.active) return "inactive";
   const when = new Date(at).getTime();
-  if (!Number.isFinite(when) || when < now) return "past";
+  if (!Number.isFinite(when) || when < now - PAST_GRACE_MS) return "past";
   if (openBetween(db, fromId, toId, now)) return "exists";
   return null;
 }
 
 /** "2026-09-20" + "18:30" from the form → ISO in the server's local time; null when unparsable. */
 export function combineDateTime(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
-  const d = new Date(`${date}T${time}:00`);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  return zonedToUtc(date, time);
 }
 
-/** Same calendar day as `now`, in the server's local time. */
+/** Same calendar day as `now`, in club time. */
 export function isToday(iso: string, now = new Date()): boolean {
-  const d = new Date(iso);
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameLocalDay(iso, now);
 }
 
 function byTime(a: Challenge, b: Challenge): number {

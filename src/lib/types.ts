@@ -181,6 +181,8 @@ export interface Challenge {
   proposedBy: string;
   /** Drawn at random when the challenge is accepted; null until then. The other player has black. */
   whiteId: string | null;
+  /** Agreed when the challenge is sent: does the game move Elo? Copied onto the recorded game. */
+  rated: boolean;
   gameId: string | null;
   createdAt: string;
   updatedAt: string;

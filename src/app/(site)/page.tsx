@@ -12,7 +12,7 @@ import { QuoteOfTheDay } from "@/components/QuoteOfTheDay";
 
 export const dynamic = "force-dynamic";
 
-const PAGE = 10;
+const PAGE = 12;
 
 export default async function Home({ searchParams }: PageProps<"/">) {
   const sp = await searchParams;
@@ -115,7 +115,8 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
+      {/* items-start: the leaderboard has a fixed row count, so stretching it to the right column would only leave a void under the table. */}
+      <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
         <Section
           title={t.home.rankings}
           flush

@@ -1,4 +1,5 @@
 import { readDb } from "@/lib/db";
+import { dayOf } from "@/lib/time";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { effectiveStatus, involves, toIcs } from "@/lib/challenges";
 import { getT } from "@/lib/lang";
@@ -20,7 +21,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   return new Response(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": `attachment; filename="chess-${c.at.slice(0, 10)}.ics"`,
+      "Content-Disposition": `attachment; filename="chess-${dayOf(c.at)}.ics"`,
     },
   });
 }

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { dayOf, localDay } from "./time";
 import path from "node:path";
 import { cache } from "react";
 import { pickAvatar } from "./avatar";
@@ -60,14 +61,17 @@ export function migrate(raw: any): Database {
   db.activity ??= [];
   db.seasons ??= [];
   db.challenges ??= [];
-  for (const c of db.challenges) c.whiteId ??= null;
+  for (const c of db.challenges) {
+    c.whiteId ??= null;
+    c.rated ??= true; // challenges before the rated/unrated choice all counted for Elo
+  }
   // Every club lives in a season. The first one opens at the first game (or today) and is named after that year.
   if (db.seasons.length === 0) {
     const first = db.games
       .map((g: any) => g.completedAt as string | null)
       .filter((x: string | null): x is string => !!x)
       .sort()[0];
-    const start = (first ?? new Date().toISOString()).slice(0, 10);
+    const start = first ? dayOf(first) : localDay();
     db.seasons.push({ id: `season-${start}`, name: `Season ${start.slice(0, 4)}`, start, end: null, championId: null });
   }
   // Faces for players created before avatars existed: seeded by id, so every read agrees.
@@ -143,7 +147,7 @@ export function snapshotLabel(raw: string, fallback = "manual"): string {
 }
 
 function todayName(): string {
-  return `db-${new Date().toISOString().slice(0, 10)}.json`;
+  return `db-${localDay()}.json`;
 }
 
 function stampedName(label: string): string {
