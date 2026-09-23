@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { localPath } from "@/lib/safe-path";
 import { redirect } from "next/navigation";
 import { readDb } from "@/lib/db";
 import { currentPlayerId } from "@/lib/auth";
@@ -21,7 +22,7 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
   const sp = await searchParams;
   const { t } = await getT();
   const db = await readDb();
-  const next = typeof sp.next === "string" && sp.next.startsWith("/") ? sp.next : "";
+  const next = localPath(sp.next, "");
   const chosenId = typeof sp.player === "string" ? sp.player : null;
   const chosen = chosenId ? db.players.find((p) => p.id === chosenId) : undefined;
   const me = await currentPlayerId();
@@ -54,13 +55,13 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
             {error && <p className="text-sm text-loss">{error}</p>}
             <div className={`grid gap-3 ${firstTime ? "grid-cols-2" : "grid-cols-1"}`}>
               <div>
-                <label className="label">{firstTime ? t.me.pin : t.me.yourPin}</label>
-                <input name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoFocus autoComplete="off" disabled={locked} className="w-full font-mono text-center text-2xl tracking-[0.5em]" />
+                <label htmlFor="f-me-pin-t-me-yourPin" className="label">{firstTime ? t.me.pin : t.me.yourPin}</label>
+                <input id="f-me-pin-t-me-yourPin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoFocus autoComplete="off" disabled={locked} className="w-full font-mono text-center text-2xl tracking-[0.5em]" />
               </div>
               {firstTime && (
                 <div>
-                  <label className="label">{t.me.repeat}</label>
-                  <input name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center text-2xl tracking-[0.5em]" />
+                  <label htmlFor="f-me-repeat" className="label">{t.me.repeat}</label>
+                  <input id="f-me-repeat" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center text-2xl tracking-[0.5em]" />
                 </div>
               )}
             </div>
@@ -108,30 +109,34 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
         </Section>
         <div className="col-stack">
           <Section title={t.me.newJoin}>
-            <form action={registerSelf} className="flex flex-col gap-3">
-              <div>
-                <label className="label" htmlFor="name">
-                  {t.me.yourName}
-                </label>
-                <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.me.namePlaceholder} autoComplete="off" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            {db.settings.selfSignupOff ? (
+              <p className="text-sm text-muted">{t.errors.signupClosed}</p>
+            ) : (
+              <form action={registerSelf} className="flex flex-col gap-3">
                 <div>
-                  <label className="label" htmlFor="pin">
-                    {t.me.pin4}
+                  <label className="label" htmlFor="name">
+                    {t.me.yourName}
                   </label>
-                  <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                  <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.me.namePlaceholder} autoComplete="off" />
                 </div>
-                <div>
-                  <label className="label" htmlFor="confirm">
-                    {t.me.repeat}
-                  </label>
-                  <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label" htmlFor="pin">
+                      {t.me.pin4}
+                    </label>
+                    <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="confirm">
+                      {t.me.repeat}
+                    </label>
+                    <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                  </div>
                 </div>
-              </div>
-              <p className="text-xs text-muted">{fmt(t.me.startHint, { rating: db.settings.startRating })}</p>
-              <SubmitButton pendingText={t.me.joining}>{t.me.joinClub}</SubmitButton>
-            </form>
+                <p className="text-xs text-muted">{fmt(t.me.startHint, { rating: db.settings.startRating })}</p>
+                <SubmitButton pendingText={t.me.joining}>{t.me.joinClub}</SubmitButton>
+              </form>
+            )}
           </Section>
           <Section title={t.me.whyAsk}>
             <ul className="text-sm text-muted flex flex-col gap-1.5 list-disc pl-4">

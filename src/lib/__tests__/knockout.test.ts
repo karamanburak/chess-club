@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { generateKnockoutRound, syncKnockout } from "../knockout";
 import { recomputeRatings } from "../elo";
-import { knockoutPlacement, matchState } from "../queries";
+import { knockoutPlacement, matchState, roundComplete } from "../queries";
 import type { Database, GameResult, Tournament } from "../types";
 import { db, player, tournament } from "./fixtures";
 
@@ -90,6 +90,38 @@ describe("generateKnockoutRound", () => {
     expect(m.winnerId).toBe("p1");
     const final = t.knockout!.matches.find((x) => x.round === 2 && !x.thirdPlace)!;
     expect([final.a, final.b].sort()).toEqual(["p1", "p2"]);
+  });
+
+  test("a withdrawal lets the round complete, and the walkover winner survives later syncs", () => {
+    const { d, t } = setup(4);
+    generateKnockoutRound(d, t);
+    const m = t.knockout!.matches.find((x) => x.a === "p4" || x.b === "p4")!;
+    t.withdrawnIds = ["p4"];
+    syncKnockout(d, t);
+    expect(m.winnerId).toBe("p1");
+    expect(m.gameIds).toEqual([]);
+    expect(d.games.some((g) => g.whiteId === "p4" || g.blackId === "p4")).toBe(false);
+    // The server action checks this before generating the next round; the withdrawn board must not block it.
+    play(d, t, 1, higherSeedWins);
+    expect(roundComplete(d, t, 1)).toBe(true);
+    syncKnockout(d, t);
+    expect(m.winnerId).toBe("p1");
+    generateKnockoutRound(d, t);
+    const final = t.knockout!.matches.find((x) => x.round === 2 && !x.thirdPlace)!;
+    expect([final.a, final.b].sort()).toEqual(["p1", "p2"]);
+  });
+
+  test("a match that is already history keeps its result when the winner withdraws later", () => {
+    const { d, t } = setup(4);
+    generateKnockoutRound(d, t);
+    play(d, t, 1, higherSeedWins);
+    generateKnockoutRound(d, t);
+    const semi = t.knockout!.matches.find((x) => x.round === 1 && (x.a === "p1" || x.b === "p1"))!;
+    t.withdrawnIds = ["p1"];
+    syncKnockout(d, t);
+    expect(semi.winnerId).toBe("p1");
+    const final = t.knockout!.matches.find((x) => x.round === 2 && !x.thirdPlace)!;
+    expect(final.winnerId).toBe("p2");
   });
 });
 

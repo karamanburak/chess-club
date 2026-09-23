@@ -38,11 +38,26 @@ export function syncKnockout(db: Database, t: Tournament) {
   const ko = t.knockout;
   if (!ko) return;
   const games = new Map(db.games.map((g) => [g.id, g]));
+  const withdrawn = new Set(t.withdrawnIds);
   for (const m of ko.matches) {
     const round = t.rounds.find((r) => r.number === m.round);
     if (!round) continue;
     if (!m.a || !m.b) {
       m.winnerId = m.a ?? m.b;
+      continue;
+    }
+    // A withdrawal hands the match to the opponent: its unplayed games go, so the round can complete. Once a later
+    // round exists the match is history and stays as played; the withdrawn winner's next match is handed over instead.
+    const aOut = withdrawn.has(m.a);
+    const bOut = withdrawn.has(m.b);
+    if (aOut !== bOut && !t.rounds.some((r) => r.number > m.round)) {
+      const unplayed = new Set(m.gameIds.filter((id) => !games.get(id)?.result));
+      if (unplayed.size) {
+        db.games = db.games.filter((x) => !unplayed.has(x.id));
+        round.pairings = round.pairings.filter((p) => !unplayed.has(p.gameId));
+        m.gameIds = m.gameIds.filter((id) => !unplayed.has(id));
+      }
+      m.winnerId = aOut ? m.b : m.a;
       continue;
     }
     const base = ko.gamesPerMatch;

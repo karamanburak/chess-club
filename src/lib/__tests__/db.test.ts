@@ -13,6 +13,26 @@ beforeAll(() => fs.mkdirSync(BACKUP_DIR, { recursive: true }));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 describe("migrate", () => {
+  test("a session keeps no time control, an ordinary challenge keeps its own", () => {
+    const base = { fromId: "a", toId: "b", at: "2026-09-23T18:00:00.000Z", place: "", note: "", status: "accepted", proposedBy: "a", whiteId: "a", rated: true, gameId: null, createdAt: "x", updatedAt: "x" };
+    const db = migrate({
+      version: 2,
+      seq: 0,
+      players: [],
+      games: [],
+      tournaments: [],
+      settings: {},
+      challenges: [
+        { ...base, id: "s", timeControl: "10+0", session: { minutes: 30, scoring: "each" } },
+        { ...base, id: "g", timeControl: "10+0" },
+      ],
+    });
+    expect(db.challenges.map((c) => [c.id, c.timeControl])).toEqual([
+      ["s", ""],
+      ["g", "10+0"],
+    ]);
+  });
+
   test("fills in fields older files lack and gives every player a unique avatar", () => {
     const raw = {
       version: 2,
@@ -82,18 +102,18 @@ describe("storage", () => {
     expect((await readDb()).activity.length).toBe(10);
   });
 
-  test("pruneBackups keeps the newest N files of any snapshot kind", () => {
-    const names = ["db-2026-01-01.json", "db-before-import-2026-01-02T10-00-00-000Z.json", "db-2026-01-03.json", "db-before-restore-2026-01-04T10-00-00-000Z.json", "db-2026-01-05.json"];
+  test("pruneBackups keeps the newest N daily and the newest N deliberate snapshots apart", () => {
+    for (const f of fs.readdirSync(BACKUP_DIR)) fs.unlinkSync(path.join(BACKUP_DIR, f));
+    const names = ["db-2026-01-01.json", "db-before-import-2026-01-02T10-00-00-000Z.json", "db-2026-01-03.json", "db-before-restore-2026-01-04T10-00-00-000Z.json", "db-2026-01-05.json", "db-before-reset-history-2026-01-06T10-00-00-000Z.json"];
     names.forEach((n, i) => {
       const f = path.join(BACKUP_DIR, n);
       fs.writeFileSync(f, "{}");
       const t = new Date(2026, 0, i + 1);
       fs.utimesSync(f, t, t);
     });
-    // The mutate() above already wrote today's daily snapshot, so count what is there and drop the two oldest.
-    const total = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".json")).length;
-    const removed = pruneBackups(total - 2);
+    // Two of each kind stay: the oldest daily and the oldest deliberate one go, although the latter is newer than two dailies.
+    const removed = pruneBackups(2);
     expect(removed.sort()).toEqual(["db-2026-01-01.json", "db-before-import-2026-01-02T10-00-00-000Z.json"].sort());
-    expect(fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".json")).length).toBe(total - 2);
+    expect(fs.readdirSync(BACKUP_DIR).sort()).toEqual(["db-2026-01-03.json", "db-2026-01-05.json", "db-before-reset-history-2026-01-06T10-00-00-000Z.json", "db-before-restore-2026-01-04T10-00-00-000Z.json"]);
   });
 });

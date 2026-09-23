@@ -102,6 +102,9 @@ flowchart LR
 | `DATABASE_URL` | Postgres connection string. Set on Vercel (Neon). Empty means the JSON file. | empty |
 | `CHESS_DATA_DIR` | Folder for `db.json` and `backups/` in file mode. Handy for a second club or a test copy. | `./data` |
 | `ADMIN_RESET_TOKEN` | Enables *Forgot the password?* on `/admin`. Set it, reset, remove it again. | empty |
+| `CLUB_TIME_ZONE` | IANA zone the club lives in. The server runs in UTC on Vercel; all shown times, "today", challenge dates and month tables use this zone. | `Europe/Berlin` |
+| `NTFY_TOPIC` | Pushes every activity-log line to this [ntfy](https://ntfy.sh) topic, see *Phone notifications*. | empty |
+| `NTFY_URL` | Self-hosted ntfy server. | `https://ntfy.sh` |
 | `NEXT_DIST_DIR` | Build folder, so a second instance does not fight the first one over `.next`. | `.next` |
 
 Club-level settings (starting Elo, bye points, default tiebreaks, language, passwords, member code) live in the app
@@ -115,6 +118,21 @@ under Admin, not in the environment. A `.env.example` is included.
 3. Deploy. The app creates its two tables on the first request.
 4. Open `/admin`, create the admin password, then **Data → Import** your local `data/db.json` to carry the club over.
 5. On **Security** set an owner password and a member code, so the public address is not an open door.
+
+## Phone notifications
+
+Everything that lands in the Admin activity log (results, pairings, challenges, new tournaments, sign-ins…) can be
+pushed to your phone through [ntfy](https://ntfy.sh), a free open-source push service with no account.
+
+1. Install the ntfy app (iOS or Android) and subscribe to a topic with a long random name, e.g.
+   `chess-club-7f3k9q2m`. The name is the only secret: anyone who knows it can read along.
+2. Set `NTFY_TOPIC` to that name (Vercel: Settings → Environment Variables, locally `.env.local`) and redeploy or
+   restart. The activity card on the Admin page shows *Phone: on* once the server sees it.
+3. Each notification carries the club name as title, the log line as text, a tag telling whether the admin or a
+   member did it, and opens the activity log when tapped. Sending happens after the response is out and never blocks
+   or fails an action; an unreachable ntfy is only noted in the server log.
+
+Self-hosted ntfy: set `NTFY_URL` to its address. Empty `NTFY_TOPIC` switches the feature off.
 
 ## Security
 

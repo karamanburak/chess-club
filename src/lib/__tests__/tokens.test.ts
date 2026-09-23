@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bindFor, createToken, hasClubAccess, isAdminToken, verifyToken } from "../tokens";
+import { ADMIN_HOURS, bindFor, createToken, hasClubAccess, isAdminToken, verifyToken } from "../tokens";
 
 const secret = "s3cret";
 
@@ -43,5 +43,13 @@ describe("tokens", () => {
     // tokens from before the binding existed are no longer accepted
     const legacy = createToken({ role: "admin", exp: Date.now() + 1000 }, secret);
     expect(isAdminToken(legacy, secret, adminHash)).toBe(false);
+  });
+
+  test("an admin session lasts hours; a token from the 30-day era is no longer accepted", () => {
+    const adminHash = "salt:pw";
+    const fresh = createToken({ role: "admin", exp: Date.now() + ADMIN_HOURS * 3600_000, bind: bindFor(adminHash) }, secret);
+    expect(isAdminToken(fresh, secret, adminHash)).toBe(true);
+    const month = createToken({ role: "admin", exp: Date.now() + 30 * 86400_000, bind: bindFor(adminHash) }, secret);
+    expect(isAdminToken(month, secret, adminHash)).toBe(false);
   });
 });

@@ -27,8 +27,8 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
 
       <form method="get" className="card flex flex-wrap items-end gap-3 mb-6">
         <div className="flex-1 min-w-40">
-          <label className="label">{t.players.h2h.playerA}</label>
-          <select name="a" defaultValue={a} className="w-full">
+          <label htmlFor="f-players-h2h-playerA" className="label">{t.players.h2h.playerA}</label>
+          <select id="f-players-h2h-playerA" name="a" defaultValue={a} className="w-full">
             {players.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.rating})
@@ -38,8 +38,8 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
         </div>
         <span className="text-muted pb-2">{t.players.h2h.vs}</span>
         <div className="flex-1 min-w-40">
-          <label className="label">{t.players.h2h.playerB}</label>
-          <select name="b" defaultValue={b} className="w-full">
+          <label htmlFor="f-players-h2h-playerB" className="label">{t.players.h2h.playerB}</label>
+          <select id="f-players-h2h-playerB" name="b" defaultValue={b} className="w-full">
             {players.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.rating})

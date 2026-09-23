@@ -81,6 +81,14 @@ export function mergePlayers(db: Database, fromId: string, intoId: string): Merg
     summary.sessions++;
   }
   for (const s of db.seasons) s.championId = swapNullable(s.championId, fromId, intoId);
+  for (const c of db.challenges) {
+    c.fromId = swap(c.fromId, fromId, intoId);
+    c.toId = swap(c.toId, fromId, intoId);
+    c.proposedBy = swap(c.proposedBy, fromId, intoId);
+    c.whiteId = swapNullable(c.whiteId, fromId, intoId);
+  }
+  // A challenge the two records had with each other would now be one against oneself.
+  db.challenges = db.challenges.filter((c) => c.fromId !== c.toId);
 
   // The surviving record keeps its own identity; it only inherits what it lacks.
   into.pinHash ??= from.pinHash;

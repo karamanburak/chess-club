@@ -1,4 +1,5 @@
 import { fmt, plural, type Dict } from "./i18n";
+import type { IconName } from "@/components/icons";
 import { dayOf, daysFromToday, localDay } from "./time";
 /**
  * The "club life" layer: titles by rating band, achievements, seasons with
@@ -154,12 +155,6 @@ export function achievements(db: Database, playerId: string): Achievement[] {
   for (const s of db.seasons) if (s.championId === playerId && s.end) mark("season-champion", `${s.end}T23:59:59.000Z`);
 
   return ACHIEVEMENTS.map((a) => ({ ...a, earnedAt: earned.get(a.key) ?? null }));
-}
-
-export function earnedAchievements(db: Database, playerId: string): Achievement[] {
-  return achievements(db, playerId)
-    .filter((a) => a.earnedAt)
-    .sort((a, b) => a.earnedAt!.localeCompare(b.earnedAt!));
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,7 +321,8 @@ const DEFAULT_HIGHLIGHT_MSGS = clubMessages.en.highlights;
 
 export interface Highlight {
   key: string;
-  icon: string;
+  /** Line icon name (see components/icons.tsx); no emoji in UI chrome. */
+  icon: IconName;
   title: string;
   text: string;
   playerId?: string;
@@ -360,7 +356,7 @@ export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"
     }
   }
   if (upset) {
-    out.push({ key: "upset", icon: "⚡", title: m.upsetTitle, text: fmt(m.upsetText, { winner: name(upset.winner), loser: name(upset.loser), diff: upset.diff }), playerId: upset.winner, gameId: upset.g.id });
+    out.push({ key: "upset", icon: "bolt", title: m.upsetTitle, text: fmt(m.upsetText, { winner: name(upset.winner), loser: name(upset.loser), diff: upset.diff }), playerId: upset.winner, gameId: upset.g.id });
   }
   let hot: { id: string; length: number } | null = null;
   for (const p of db.players) {
@@ -368,16 +364,16 @@ export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"
     const s = streaks(db, p.id).current;
     if (s && s.kind === "W" && s.length >= 3 && (!hot || s.length > hot.length)) hot = { id: p.id, length: s.length };
   }
-  if (hot) out.push({ key: "hot", icon: "🔥", title: m.hotTitle, text: fmt(m.hotText, { name: name(hot.id), n: hot.length }), playerId: hot.id });
+  if (hot) out.push({ key: "hot", icon: "flame", title: m.hotTitle, text: fmt(m.hotText, { name: name(hot.id), n: hot.length }), playerId: hot.id });
 
   const climber = [...gain.entries()].filter(([, v]) => v >= 30).sort((a, b) => b[1] - a[1])[0];
-  if (climber) out.push({ key: "climber", icon: "📈", title: m.climberTitle, text: fmt(m.climberText, { name: name(climber[0]), n: climber[1], days }), playerId: climber[0] });
+  if (climber) out.push({ key: "climber", icon: "trend", title: m.climberTitle, text: fmt(m.climberText, { name: name(climber[0]), n: climber[1], days }), playerId: climber[0] });
 
   const busiest = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
-  if (busiest && busiest[1] >= 3) out.push({ key: "busiest", icon: "♟", title: m.busiestTitle, text: fmt(m.busiestText, { name: name(busiest[0]), n: busiest[1], days }), playerId: busiest[0] });
+  if (busiest && busiest[1] >= 3) out.push({ key: "busiest", icon: "pawn", title: m.busiestTitle, text: fmt(m.busiestText, { name: name(busiest[0]), n: busiest[1], days }), playerId: busiest[0] });
 
   const newcomer = db.players.filter((p) => p.createdAt >= since && p.gamesPlayed > 0).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  if (newcomer) out.push({ key: "newcomer", icon: "👋", title: m.newcomerTitle, text: fmt(plural(newcomer.gamesPlayed, m.newcomerText), { name: newcomer.name }), playerId: newcomer.id });
+  if (newcomer) out.push({ key: "newcomer", icon: "sparkle", title: m.newcomerTitle, text: fmt(plural(newcomer.gamesPlayed, m.newcomerText), { name: newcomer.name }), playerId: newcomer.id });
 
   const season = currentSeason(db);
   if (season) {
@@ -385,7 +381,7 @@ export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"
     if (table.length >= 2 && table[0].points - table[1].points <= 1 && table[0].games >= 3) {
       const gap = table[0].points - table[1].points;
       const vars = { leader: name(table[0].playerId), second: name(table[1].playerId) };
-      out.push({ key: "race", icon: "🏁", title: fmt(m.raceTitle, { season: season.name }), text: gap === 0 ? fmt(m.raceTextTied, vars) : fmt(plural(gap, m.raceText), vars), playerId: table[0].playerId });
+      out.push({ key: "race", icon: "flag", title: fmt(m.raceTitle, { season: season.name }), text: gap === 0 ? fmt(m.raceTextTied, vars) : fmt(plural(gap, m.raceText), vars), playerId: table[0].playerId });
     }
   }
   return out.slice(0, 5);

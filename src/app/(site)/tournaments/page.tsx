@@ -81,21 +81,21 @@ export default async function TournamentsPage() {
         <Section title={msg.tournaments.newTournament}>
           <form action={createTournament} className="flex flex-col gap-4">
             <div>
-              <label className="label">{msg.tournaments.form.name}</label>
-              <input name="name" required className="w-full" placeholder={msg.tournaments.form.namePlaceholder} autoComplete="off" />
+              <label htmlFor="f-tournaments-form-name" className="label">{msg.tournaments.form.name}</label>
+              <input id="f-tournaments-form-name" name="name" required className="w-full" placeholder={msg.tournaments.form.namePlaceholder} autoComplete="off" />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="label">{msg.tournaments.form.date}</label>
-                <input name="date" type="date" defaultValue={localDay()} className="w-full" />
+                <label htmlFor="f-tournaments-form-date" className="label">{msg.tournaments.form.date}</label>
+                <input id="f-tournaments-form-date" name="date" type="date" defaultValue={localDay()} className="w-full" />
               </div>
               <div className={`transition-opacity [form:has(input[name=pairingMode][value=roundrobin]:checked)_&]:opacity-50 [form:has(input[name=pairingMode][value=knockout]:checked)_&]:opacity-50`} title={msg.tournaments.form.roundsAuto}>
-                <label className="label">{msg.tournaments.form.rounds}</label>
-                <input name="plannedRounds" type="number" min={1} max={30} defaultValue={suggestedRounds} className="w-full" />
+                <label htmlFor="f-tournaments-form-rounds" className="label">{msg.tournaments.form.rounds}</label>
+                <input id="f-tournaments-form-rounds" name="plannedRounds" type="number" min={1} max={30} defaultValue={suggestedRounds} className="w-full" />
               </div>
               <div>
-                <label className="label">{msg.tournaments.form.timeControl}</label>
-                <input name="timeControl" className="w-full" placeholder="5+3" list="tc" />
+                <label htmlFor="f-tournaments-form-timeControl" className="label">{msg.tournaments.form.timeControl}</label>
+                <input id="f-tournaments-form-timeControl" name="timeControl" className="w-full" placeholder="5+3" list="tc" />
                 <datalist id="tc">
                   <option value="3+2" />
                   <option value="5+0" />
@@ -125,8 +125,8 @@ export default async function TournamentsPage() {
             <fieldset className={`hidden [form:has(input[name=pairingMode][value=knockout]:checked)_&]:flex flex-col gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3`}>
               <legend className="label px-1">{msg.tournaments.form.knockoutOptions}</legend>
               <div>
-                <label className="label">{msg.tournaments.form.gamesPerMatchShort}</label>
-                <select name="gamesPerMatch" className="w-full" defaultValue="1">
+                <label htmlFor="f-tournaments-form-gamesPerMatchShort" className="label">{msg.tournaments.form.gamesPerMatchShort}</label>
+                <select id="f-tournaments-form-gamesPerMatchShort" name="gamesPerMatch" className="w-full" defaultValue="1">
                   <option value="1">{msg.tournaments.form.oneGameTiebreak}</option>
                   <option value="2">{msg.tournaments.form.twoGamesSwapped}</option>
                 </select>
@@ -137,8 +137,8 @@ export default async function TournamentsPage() {
             </fieldset>
             <div className={`grid grid-cols-1 gap-3 [form:has(input[name=pairingMode][value=knockout]:checked)_&]:hidden`}>
               <div>
-                <label className="label">{msg.tournaments.form.tiebreaks}</label>
-                <select name="tiebreaks" className="w-full" defaultValue="club">
+                <label htmlFor="f-tournaments-form-tiebreaks" className="label">{msg.tournaments.form.tiebreaks}</label>
+                <select id="f-tournaments-form-tiebreaks" name="tiebreaks" className="w-full" defaultValue="club">
                   {tiebreakPresets(msg.tournaments.tiebreakPresets).map((p) => (
                     <option key={p.key} value={p.key}>
                       {p.label}
@@ -147,8 +147,8 @@ export default async function TournamentsPage() {
                 </select>
               </div>
               <div>
-                <label className="label">{msg.tournaments.form.byeScores}</label>
-                <select name="byePoints" className="w-full" defaultValue={String(db.settings.byePoints)}>
+                <label htmlFor="f-tournaments-form-byeScores" className="label">{msg.tournaments.form.byeScores}</label>
+                <select id="f-tournaments-form-byeScores" name="byePoints" className="w-full" defaultValue={String(db.settings.byePoints)}>
                   <option value="1">{msg.tournaments.form.onePoint}</option>
                   <option value="0.5">{msg.tournaments.form.halfPoint}</option>
                 </select>

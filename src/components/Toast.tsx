@@ -29,7 +29,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (t: Omit<Toast, "id">) => {
       const id = ++counter.current;
       setToasts((ts) => [...ts.slice(-3), { ...t, id }]);
-      setTimeout(() => dismiss(id), t.undo ? 7000 : 3500);
+      // Errors stay longer: they say what to fix, and there is more to read.
+      setTimeout(() => dismiss(id), t.undo ? 7000 : t.tone === "error" ? 8000 : 4000);
     },
     [dismiss],
   );
@@ -37,7 +38,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 items-center pointer-events-none no-print">
+      {/* On phones the bottom tab bar (h-14 + safe area) sits there, so toasts float above it. */}
+      <div role="status" aria-live="polite" className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-5 left-1/2 -translate-x-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md flex-col gap-2 items-center pointer-events-none no-print">
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onClose={() => dismiss(t.id)} />
         ))}
@@ -75,7 +77,7 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
       {toast.undo && (
         <button type="button" onClick={run} disabled={busy} className="btn btn-sm btn-primary">
           {busy ? "…" : t.pairing.undo}
-          <span className="kbd ml-1 border-accent-fg/30 text-accent-fg bg-transparent">⌘Z</span>
+          <span className="kbd ml-1 border-accent-fg/30 text-accent-fg bg-transparent hidden md:inline-flex">⌘Z</span>
         </button>
       )}
       <button type="button" onClick={onClose} className="text-muted hover:text-fg text-base leading-none" aria-label={t.pairing.dismiss}>

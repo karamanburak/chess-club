@@ -25,7 +25,7 @@ export function KnightMark({ className = "", mono = false, ...rest }: SVGProps<S
   );
 }
 
-export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv" | "settings" | "more" | "clock";
+export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv" | "settings" | "more" | "clock" | "bolt" | "flame" | "trend" | "sparkle" | "bell";
 
 /** Small line icons, all on the same 24px grid and stroke, so the header reads as one family. */
 export function Icon({ name, className = "h-4 w-4", ...rest }: { name: IconName } & SVGProps<SVGSVGElement>) {
@@ -36,6 +36,39 @@ export function Icon({ name, className = "h-4 w-4", ...rest }: { name: IconName 
         <svg {...common}>
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+      );
+    case "bolt":
+      return (
+        <svg {...common}>
+          <path d="M13 2.5 4.5 13.5H11l-1 8 8.5-11H12l1-8z" />
+        </svg>
+      );
+    case "flame":
+      return (
+        <svg {...common}>
+          <path d="M12 21.5c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.3-5.4 3.6-7.6.3 1.7 1.2 2.9 2.3 3.4 0-3 1.3-5.7 3.6-8.1.2 3.2 1.4 5 2.6 6.6 1.2 1.6 1.9 3.3 1.9 5.7 0 3.6-2.6 6.2-6.5 6.2z" />
+          <path d="M12 21.5c-1.7 0-2.8-1.2-2.8-2.8 0-1.5 1-2.4 1.6-3.4.5 1 1.3 1.6 2.1 1.6.2-.9.4-1.7.9-2.4.7 1.1 1.1 2 1.1 3.2 0 2.1-1.2 3.8-2.9 3.8z" />
+        </svg>
+      );
+    case "trend":
+      return (
+        <svg {...common}>
+          <path d="M3.5 17.5 9.5 11.5l4 4 7-7.5" />
+          <path d="M15 8h5.5v5.5" />
+        </svg>
+      );
+    case "sparkle":
+      return (
+        <svg {...common}>
+          <path d="M12 3.5 13.8 10.2 20.5 12l-6.7 1.8L12 20.5l-1.8-6.7L3.5 12l6.7-1.8z" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg {...common}>
+          <path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z" />
+          <path d="M10 20.5a2 2 0 0 0 4 0" />
         </svg>
       );
     case "clock":

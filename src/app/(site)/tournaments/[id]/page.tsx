@@ -777,8 +777,8 @@ export default async function TournamentPage({
                   className="flex flex-col gap-3"
                 >
                   <div>
-                    <label className="label">{msg.tournaments.form.name}</label>
-                    <input
+                    <label htmlFor="f-tournaments-form-name" className="label">{msg.tournaments.form.name}</label>
+                    <input id="f-tournaments-form-name"
                       name="name"
                       defaultValue={t.name}
                       className="w-full"
@@ -786,8 +786,8 @@ export default async function TournamentPage({
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="label">{msg.tournaments.form.date}</label>
-                      <input
+                      <label htmlFor="f-tournaments-form-date" className="label">{msg.tournaments.form.date}</label>
+                      <input id="f-tournaments-form-date"
                         name="date"
                         type="date"
                         defaultValue={t.date}
@@ -795,8 +795,8 @@ export default async function TournamentPage({
                       />
                     </div>
                     <div>
-                      <label className="label">{msg.tournaments.form.rounds}</label>
-                      <input
+                      <label htmlFor="f-tournaments-form-rounds" className="label">{msg.tournaments.form.rounds}</label>
+                      <input id="f-tournaments-form-rounds"
                         name="plannedRounds"
                         type="number"
                         min={Math.max(1, t.rounds.length)}
@@ -807,8 +807,8 @@ export default async function TournamentPage({
                       />
                     </div>
                     <div>
-                      <label className="label">{msg.tournaments.form.timeControl}</label>
-                      <input
+                      <label htmlFor="f-tournaments-form-timeControl" className="label">{msg.tournaments.form.timeControl}</label>
+                      <input id="f-tournaments-form-timeControl"
                         name="timeControl"
                         defaultValue={t.timeControl}
                         className="w-full"
@@ -817,8 +817,8 @@ export default async function TournamentPage({
                     </div>
                   </div>
                   <div>
-                    <label className="label">{msg.tournaments.form.tiebreaks}</label>
-                    <select
+                    <label htmlFor="f-tournaments-form-tiebreaks" className="label">{msg.tournaments.form.tiebreaks}</label>
+                    <select id="f-tournaments-form-tiebreaks"
                       name="tiebreaks"
                       className="w-full"
                       defaultValue={
@@ -838,8 +838,8 @@ export default async function TournamentPage({
                     <>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="label">{msg.tournaments.form.format}</label>
-                          <select
+                          <label htmlFor="f-tournaments-form-format" className="label">{msg.tournaments.form.format}</label>
+                          <select id="f-tournaments-form-format"
                             name="pairingMode"
                             defaultValue={t.pairingMode}
                             className="w-full"
@@ -851,8 +851,8 @@ export default async function TournamentPage({
                           </select>
                         </div>
                         <div>
-                          <label className="label">{msg.tournaments.form.byeScores}</label>
-                          <select
+                          <label htmlFor="f-tournaments-form-byeScores" className="label">{msg.tournaments.form.byeScores}</label>
+                          <select id="f-tournaments-form-byeScores"
                             name="byePoints"
                             defaultValue={String(t.byePoints)}
                             className="w-full"

@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { answerChallenge, cancelChallenge, proposeChallengeTime, recordChallengeResult } from "@/lib/actions";
-import { effectiveStatus, googleCalendarUrl, isToday, playedSummary, SETTLED_QUIET } from "@/lib/challenges";
+import { addSessionGame, answerChallenge, cancelChallenge, finishSession, proposeChallengeTime, recordChallengeResult } from "@/lib/actions";
+import { challengeGameIds, effectiveStatus, gameBySession, googleCalendarUrl, isToday, nextSessionColors, playedSummary, recordable, sessionScore, SETTLED_QUIET } from "@/lib/challenges";
 import { fmt, type Dict, type Lang } from "@/lib/i18n";
 import { formatDateTime, resultLabel } from "@/lib/queries";
 import { localDay, localTime } from "@/lib/time";
@@ -19,8 +19,16 @@ import { Avatar, ColorDot, Pill, PlayerLink } from "./ui";
 export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", games }: { c: Challenge; names: Map<string, Player>; me: string | null; admin: boolean; t: Dict; lang: Lang; clubName?: string; games?: Map<string, Game> }) {
   const m = t.challenges;
   const status = effectiveStatus(c);
-  const game = status === "played" && c.gameId ? games?.get(c.gameId) ?? null : null;
-  const played = game ? playedSummary(game, me) : null;
+  const each = gameBySession(c);
+  const game = status === "played" && c.gameId && !each ? games?.get(c.gameId) ?? null : null;
+  const sessionGames = each ? challengeGameIds(c).flatMap((id) => games?.get(id) ?? []) : [];
+  const score = each ? sessionScore(c, new Map(sessionGames.map((g) => [g.id, g]))) : null;
+  // A finished session reads like one game from the viewer's seat: won, lost or drawn on points.
+  const sessionOutcome =
+    each && status === "played" && score && (me === c.fromId || me === c.toId)
+      ? ((mine: number, theirs: number): "won" | "lost" | "draw" => (mine > theirs ? "won" : mine < theirs ? "lost" : "draw"))(me === c.fromId ? score.from : score.to, me === c.fromId ? score.to : score.from)
+      : null;
+  const played = game ? playedSummary(game, me) : sessionOutcome ? { outcome: sessionOutcome, delta: null } : null;
   const involved = admin || (!!me && (c.fromId === me || c.toId === me));
   const myTurn = status === "pending" && (admin || (!!me && c.proposedBy !== me));
   const from = names.get(c.fromId);
@@ -32,27 +40,111 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", gam
   const dateInput = localDay(new Date(c.at));
   const timeInput = localTime(new Date(c.at));
 
-  // Nothing came of it: one quiet line, so the games that were played stand out in the same list.
-  if (SETTLED_QUIET.includes(status)) {
-    return (
-      <li className="flex items-center justify-between gap-3 rounded-xl border border-line/60 px-3 py-2 text-sm text-muted">
-        <span className="flex items-center gap-2 min-w-0">
-          <Avatar id={c.fromId} name={from?.name ?? "?"} size="sm" />
-          <Avatar id={c.toId} name={to?.name ?? "?"} size="sm" />
-          <span className="truncate">
-            {other ? fmt(m.vs, { name: other.name }) : `${from?.name ?? "?"} – ${to?.name ?? "?"}`}
-            <span className="text-xs"> · {formatDateTime(c.at, lang)}</span>
+  const half = (n: number) => (n % 1 === 0.5 ? `${Math.floor(n) || ""}½` : String(n));
+  const resultChips = (
+    <div className="grid grid-cols-3 gap-2">
+      {[
+        ["1-0", "1–0"],
+        ["1/2-1/2", "½–½"],
+        ["0-1", "0–1"],
+      ].map(([v, l]) => (
+        <label key={v} className="chip justify-center">
+          <input type="radio" name="result" value={v} required className="sr-only" />
+          <span className="font-mono font-medium">{l}</span>
+        </label>
+      ))}
+    </div>
+  );
+
+  // Every game of an `each` session in order, with the running score; while it is open, the next game and "finish".
+  const sessionPanel = each && (
+    <div className="flex flex-col gap-2 w-full">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted">
+        <span className="label mb-0">{m.sessionGames}</span>
+        {score && score.games > 0 && (
+          <span className="font-mono text-sm text-fg">
+            {fmt(m.sessionScoreLine, { from: from?.name ?? "?", a: half(score.from), b: half(score.to), to: to?.name ?? "?" })}
           </span>
-        </span>
-        <Pill tone="muted">{label}</Pill>
+        )}
+      </div>
+      {sessionGames.length === 0 ? (
+        <p className="text-xs text-muted">{m.sessionNoGamesYet}</p>
+      ) : (
+        <ol className="flex flex-col divide-y divide-line/60 rounded-lg border border-line/60 text-sm">
+          {sessionGames.map((g, i) => (
+            <li key={g.id} className="flex items-center gap-2 px-3 py-1.5">
+              <span className="w-16 shrink-0 text-xs text-muted">{fmt(m.sessionGameN, { n: i + 1 })}</span>
+              <ColorDot color="white" /> <span className="truncate">{names.get(g.whiteId)?.name ?? "?"}</span>
+              <span className="font-mono font-semibold">{resultLabel(g.result)}</span>
+              <span className="truncate">{names.get(g.blackId)?.name ?? "?"}</span> <ColorDot color="black" />
+            </li>
+          ))}
+        </ol>
+      )}
+      {involved && recordable(c) && (
+        <div className="flex flex-wrap items-start gap-2">
+          <details className="group">
+            <summary className="btn btn-sm btn-primary cursor-pointer list-none inline-flex">{m.addGame}</summary>
+            <form action={addSessionGame.bind(null, c.id)} className="mt-2 flex flex-col gap-3 rounded-xl border border-line bg-panel-2/40 p-3 text-sm">
+              <p className="text-xs text-muted">{fmt(m.sessionNextColors, { name: names.get(nextSessionColors(c).whiteId)?.name ?? "?" })}</p>
+              {resultChips}
+              <SubmitButton className="btn btn-primary btn-sm self-start" pendingText={t.common.saving}>
+                {m.save}
+              </SubmitButton>
+            </form>
+          </details>
+          {sessionGames.length > 0 && (
+            <ConfirmButton action={finishSession.bind(null, c.id)} className="btn btn-sm" confirmLabel={m.finishConfirm}>
+              {m.finishSession}
+            </ConfirmButton>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const recordForm = each ? sessionPanel : (
+    <details className="group w-full">
+      <summary className="btn btn-sm btn-primary cursor-pointer list-none inline-flex">{m.recordResult}</summary>
+      <form action={recordChallengeResult.bind(null, c.id)} className="mt-2 flex flex-col gap-3 rounded-xl border border-line bg-panel-2/40 p-3 text-sm">
+        <p className="text-xs text-muted">
+          {c.session ? m.sessionSingleHint : c.whiteId ? fmt(m.whitePlays, { name: names.get(c.whiteId)?.name ?? "?" }) : m.colorsDrawn}
+        </p>
+        {resultChips}
+        <p className="text-xs text-muted">{c.rated ? m.ratedOn : m.ratedOff}</p>
+        <SubmitButton className="btn btn-primary btn-sm self-start" pendingText={t.common.saving}>
+          {m.save}
+        </SubmitButton>
+      </form>
+    </details>
+  );
+
+  // Nothing came of it: one quiet line, so the games that were played stand out in the same list.
+  // An agreed game past its day that nobody entered keeps the result form, so it can still be recorded.
+  if (SETTLED_QUIET.includes(status)) {
+    const late = involved && recordable(c);
+    return (
+      <li className="flex flex-col gap-2 rounded-xl border border-line/60 px-3 py-2 text-sm text-muted">
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2 min-w-0">
+            <Avatar id={c.fromId} name={from?.name ?? "?"} size="sm" />
+            <Avatar id={c.toId} name={to?.name ?? "?"} size="sm" />
+            <span className="truncate">
+              {other ? fmt(m.vs, { name: other.name }) : `${from?.name ?? "?"} – ${to?.name ?? "?"}`}
+              <span className="text-xs"> · {formatDateTime(c.at, lang)}</span>
+            </span>
+          </span>
+          <Pill tone="muted">{label}</Pill>
+        </div>
+        {late && recordForm}
       </li>
     );
   }
 
   return (
     <li className={`card flex flex-col gap-3 ${today ? "border-accent/50 bg-accent/5" : ""}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <Avatar id={c.fromId} name={from?.name ?? "?"} size="sm" />
           <Avatar id={c.toId} name={to?.name ?? "?"} size="sm" />
           <div className="min-w-0 text-sm">
@@ -67,7 +159,8 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", gam
               {formatDateTime(c.at, lang)}
               {today && <span className="ml-2 text-accent font-medium">{m.today}</span>}
               {c.place && ` · ${c.place}`}
-              {c.timeControl && <span className="font-mono"> · {c.timeControl}</span>}
+              {c.timeControl && !c.session && <span className="font-mono"> · {c.timeControl}</span>}
+              {c.session && ` · ${fmt(m.sessionPill, { duration: m.durations[String(c.session.minutes) as keyof typeof m.durations] ?? `${c.session.minutes}` })}`}
             </div>
           </div>
         </div>
@@ -99,6 +192,7 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", gam
           </p>
         )
       )}
+      {each && status === "played" && sessionPanel}
       {c.note && <p className="text-sm text-muted">{c.note}</p>}
       {status === "pending" && c.proposedBy !== c.fromId && (
         <p className="text-xs text-accent">{fmt(m.counterBy, { name: names.get(c.proposedBy)?.name ?? "?" })}</p>
@@ -139,48 +233,23 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", gam
             <summary className="btn btn-sm btn-ghost cursor-pointer list-none">{m.propose}</summary>
             <form action={proposeChallengeTime.bind(null, c.id)} className="mt-2 flex flex-wrap items-end gap-2 rounded-xl border border-line bg-panel-2/40 p-3">
               <div>
-                <label className="label">{m.date}</label>
-                <input name="date" type="date" defaultValue={dateInput} required />
+                <label htmlFor={`f-date-${c.id}`} className="label">{m.date}</label>
+                <input id={`f-date-${c.id}`} name="date" type="date" defaultValue={dateInput} required />
               </div>
               <div>
-                <label className="label">{m.time}</label>
-                <input name="time" type="time" defaultValue={timeInput} required />
+                <label htmlFor={`f-time-${c.id}`} className="label">{m.time}</label>
+                <input id={`f-time-${c.id}`} name="time" type="time" defaultValue={timeInput} required />
               </div>
               <div>
-                <label className="label">{m.place}</label>
-                <input name="place" defaultValue={c.place} placeholder={m.placePlaceholder} className="w-36" />
+                <label htmlFor={`f-place-${c.id}`} className="label">{m.place}</label>
+                <input id={`f-place-${c.id}`} name="place" defaultValue={c.place} placeholder={m.placePlaceholder} className="w-36" />
               </div>
               <SubmitButton className="btn btn-sm" pendingText="…">
                 {m.proposeSend}
               </SubmitButton>
             </form>
           </details>
-          {status === "accepted" && (
-            <details className="group w-full">
-              <summary className="btn btn-sm btn-primary cursor-pointer list-none inline-flex">{m.recordResult}</summary>
-              <form action={recordChallengeResult.bind(null, c.id)} className="mt-2 flex flex-col gap-3 rounded-xl border border-line bg-panel-2/40 p-3 text-sm">
-                <p className="text-xs text-muted">
-                  {c.whiteId ? fmt(m.whitePlays, { name: names.get(c.whiteId)?.name ?? "?" }) : m.colorsDrawn}
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    ["1-0", "1–0"],
-                    ["1/2-1/2", "½–½"],
-                    ["0-1", "0–1"],
-                  ].map(([v, l], i) => (
-                    <label key={v} className="chip justify-center">
-                      <input type="radio" name="result" value={v} defaultChecked={i === 0} className="sr-only" />
-                      <span className="font-mono font-medium">{l}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-muted">{c.rated ? m.ratedOn : m.ratedOff}</p>
-                <SubmitButton className="btn btn-primary btn-sm self-start" pendingText={t.common.saving}>
-                  {m.save}
-                </SubmitButton>
-              </form>
-            </details>
-          )}
+          {status === "accepted" && recordForm}
           <span className="ml-auto">
             <ConfirmButton action={cancelChallenge.bind(null, c.id)} className="btn btn-sm btn-ghost text-muted" confirmLabel={m.cancelConfirm}>
               {m.cancel}
@@ -188,7 +257,7 @@ export function ChallengeCard({ c, names, me, admin, t, lang, clubName = "", gam
           </span>
         </div>
       )}
-      {status === "played" && c.gameId && (
+      {status === "played" && (c.gameId || each) && (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Link href={`/games?kind=friendly${other ? `&q=${encodeURIComponent(other.name)}` : ""}`} className="text-xs text-muted hover:text-accent">
             {m.openGames} →

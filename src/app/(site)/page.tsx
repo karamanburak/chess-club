@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
-import { isToday, pendingFor, upcoming } from "@/lib/challenges";
+import { MyChallenges } from "@/components/MyChallenges";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
 import { currentSeason, daysUntil, highlights, seasonOverdue, titleFor } from "@/lib/club";
@@ -25,7 +25,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const shown = board.slice(offset, offset + PAGE);
   const names = playerMap(db);
   const played = completedGames(db);
-  const recent = played.slice(0, 8);
+  const recent = played.slice(0, 10);
   const open = db.tournaments.filter((t) => t.status !== "finished").sort((a, b) => b.date.localeCompare(a.date));
   const top = board[0];
   const night = activeSession(db);
@@ -41,8 +41,6 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const admin = await isAdmin();
   const member = admin || !!me;
   const overdue = season && admin ? seasonOverdue(season) : null;
-  const agreed = upcoming(db).slice(0, 5);
-  const waiting = me ? pendingFor(db, me).length : 0;
 
   return (
     <>
@@ -115,8 +113,27 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </div>
       </div>
 
-      {/* items-start: the leaderboard has a fixed row count, so stretching it to the right column would only leave a void under the table. */}
-      <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
+      {/* Personal first, full width: what waits on me. Then two lists of similar height side by side, then three small cards. */}
+      <div className="mb-6 empty:hidden">
+        <MyChallenges db={db} me={me} admin={admin} t={t} lang={lang} />
+      </div>
+      {night && nightRound && (
+        <Link href="/pairing" className="card mb-6 border-accent/40 hover:border-accent/70 transition-colors flex items-center gap-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
+            <Icon name="pawn" className="h-5 w-5" />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block font-semibold">{t.home.nightInProgress}</span>
+            <span className="block text-sm text-muted">
+              {fmt(t.common.roundN, { n: nightRound.number })} · {plural(nightRound.pairings.length, t.common.boardsN)} ·{" "}
+              {sessionRoundComplete(db, nightRound) ? t.home.allResultsIn : fmt(t.home.stillPlaying, { n: nightPending })}
+            </span>
+          </span>
+          <span className="text-muted">→</span>
+        </Link>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <Section
           title={t.home.rankings}
           flush
@@ -208,125 +225,88 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             </div>
           )}
         </Section>
-
-        <div className="col-stack">
-          {(agreed.length > 0 || waiting > 0) && (
-            <Section title={t.challenges.upcomingAll} right={<Link href="/challenges" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
-              <div className="flex flex-col gap-2 text-sm">
-                {waiting > 0 && (
-                  <Link href="/challenges" className="rounded-xl border border-accent/50 bg-accent/10 px-3 py-2 text-accent font-medium hover:bg-accent/15">
-                    {fmt(t.challenges.badge, { n: waiting })} →
-                  </Link>
-                )}
-                {agreed.map((c) => (
-                  <div key={c.id} className={`flex items-center gap-3 ${isToday(c.at) ? "text-fg" : ""}`}>
-                    <span className="text-xs text-muted font-mono whitespace-nowrap w-28">{formatDateTime(c.at, lang)}</span>
-                    <span className="flex items-center gap-1.5 min-w-0 flex-1">
-                      <PlayerLink id={c.fromId} name={names.get(c.fromId)?.name ?? "?"} avatar />
-                      <span className="text-muted">–</span>
-                      <PlayerLink id={c.toId} name={names.get(c.toId)?.name ?? "?"} avatar />
+        <Section title={t.home.recentGames} right={<Link href="/games" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
+          {recent.length === 0 ? (
+            <p className="text-sm text-muted">{t.home.noGamesHint}</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-line/60 -my-2 text-sm">
+              {recent.map((g) => {
+                const w = names.get(g.whiteId)?.name ?? "?";
+                const b = names.get(g.blackId)?.name ?? "?";
+                const whiteWon = g.result === "1-0" || g.result === "+/-";
+                const blackWon = g.result === "0-1" || g.result === "-/+";
+                return (
+                  <li key={g.id} className="py-2.5 flex items-center gap-2">
+                    <span className={`flex-1 min-w-0 text-right truncate ${whiteWon ? "font-semibold" : "text-muted"}`}>
+                      <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} className="mr-1.5" />
+                      <PlayerLink id={g.whiteId} name={w} />
                     </span>
-                    {isToday(c.at) && <span className="badge border-accent/50 text-accent">{t.challenges.today}</span>}
-                  </div>
-                ))}
-              </div>
-            </Section>
+                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line shrink-0">{resultLabel(g.result)}</span>
+                    <span className={`flex-1 min-w-0 truncate ${blackWon ? "font-semibold" : "text-muted"}`}>
+                      <PlayerLink id={g.blackId} name={b} />
+                      <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-1.5" />
+                    </span>
+                    <span className="text-[11px] text-muted whitespace-nowrap hidden sm:inline">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-          {hl.length > 0 && (
-            <Section title={t.home.aroundTheClub} right={<Link href="/hall-of-fame" className="btn btn-sm btn-ghost">{t.home.hallOfFame}</Link>}>
-              <ul className="flex flex-col gap-3 -my-1">
-                {hl.map((h) => (
-                  <li key={h.key} className="flex items-start gap-3">
-                    <span className="text-2xl leading-none mt-0.5" aria-hidden>
-                      {h.icon}
-                    </span>
+        </Section>
+      </div>
+
+      <div className="mt-6 grid gap-6 md:grid-cols-2">
+        <Section title={t.home.tournaments} right={<Link href="/tournaments" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
+          {open.length === 0 ? (
+            <p className="text-sm text-muted">
+              {t.home.nothingRunning}{" "}
+              <Link className="text-accent hover:underline" href="/tournaments">
+                {t.home.createOne}
+              </Link>
+            </p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-line/60 -my-2">
+              {open.map((tr) => (
+                <li key={tr.id}>
+                  <Link href={`/tournaments/${tr.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-accent transition-colors">
                     <span className="min-w-0">
-                      <span className="block text-[11px] uppercase tracking-wider text-muted">{h.title}</span>
-                      <span className="block text-sm">
-                        {h.playerId ? (
-                          <Link href={`/players/${h.playerId}`} className="hover:text-accent">
-                            {h.text}
-                          </Link>
-                        ) : (
-                          h.text
-                        )}
+                      <span className="block font-medium truncate">{tr.name}</span>
+                      <span className="block text-xs text-muted">
+                        {plural(tr.participantIds.length, t.common.playersN)} · {fmt(t.common.roundNofTotal, { n: tr.rounds.length, total: tr.plannedRounds })}
                       </span>
                     </span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
+                    <StatusBadge status={tr.status} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
           )}
-          {night && nightRound && (
-            <Link href="/pairing" className="card border-accent/40 hover:border-accent/70 transition-colors flex items-center gap-4">
-              <span className="text-3xl">♟</span>
-              <span className="flex-1 min-w-0">
-                <span className="block font-semibold">{t.home.nightInProgress}</span>
-                <span className="block text-sm text-muted">
-                  {fmt(t.common.roundN, { n: nightRound.number })} · {plural(nightRound.pairings.length, t.common.boardsN)} ·{" "}
-                  {sessionRoundComplete(db, nightRound) ? t.home.allResultsIn : fmt(t.home.stillPlaying, { n: nightPending })}
-                </span>
-              </span>
-              <span className="text-muted">→</span>
-            </Link>
-          )}
-
-          <Section title={t.home.tournaments} right={<Link href="/tournaments" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
-            {open.length === 0 ? (
-              <p className="text-sm text-muted">
-                {t.home.nothingRunning}{" "}
-                <Link className="text-accent hover:underline" href="/tournaments">
-                  {t.home.createOne}
-                </Link>
-              </p>
-            ) : (
-              <ul className="flex flex-col divide-y divide-line/60 -my-2">
-                {open.map((tr) => (
-                  <li key={tr.id}>
-                    <Link href={`/tournaments/${tr.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-accent transition-colors">
-                      <span className="min-w-0">
-                        <span className="block font-medium truncate">{tr.name}</span>
-                        <span className="block text-xs text-muted">
-                          {plural(tr.participantIds.length, t.common.playersN)} · {fmt(t.common.roundNofTotal, { n: tr.rounds.length, total: tr.plannedRounds })}
-                        </span>
-                      </span>
-                      <StatusBadge status={tr.status} />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
+        </Section>
+        {hl.length > 0 && (
+          <Section title={t.home.aroundTheClub} right={<Link href="/hall-of-fame" className="btn btn-sm btn-ghost">{t.home.hallOfFame}</Link>}>
+            <ul className="flex flex-col gap-3 -my-1">
+              {hl.map((h) => (
+                <li key={h.key} className="flex items-start gap-3">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+                    <Icon name={h.icon} className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] uppercase tracking-wider text-muted">{h.title}</span>
+                    <span className="block text-sm">
+                      {h.playerId ? (
+                        <Link href={`/players/${h.playerId}`} className="hover:text-accent">
+                          {h.text}
+                        </Link>
+                      ) : (
+                        h.text
+                      )}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </Section>
-
-          <Section title={t.home.recentGames} right={<Link href="/games" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
-            {recent.length === 0 ? (
-              <p className="text-sm text-muted">{t.home.noGamesHint}</p>
-            ) : (
-              <ul className="flex flex-col divide-y divide-line/60 -my-2 text-sm">
-                {recent.map((g) => {
-                  const w = names.get(g.whiteId)?.name ?? "?";
-                  const b = names.get(g.blackId)?.name ?? "?";
-                  const whiteWon = g.result === "1-0" || g.result === "+/-";
-                  const blackWon = g.result === "0-1" || g.result === "-/+";
-                  return (
-                    <li key={g.id} className="py-2.5 flex items-center gap-2">
-                      <span className={`flex-1 min-w-0 text-right truncate ${whiteWon ? "font-semibold" : "text-muted"}`}>
-                        <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} className="mr-1.5" />
-                        <PlayerLink id={g.whiteId} name={w} />
-                      </span>
-                      <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line shrink-0">{resultLabel(g.result)}</span>
-                      <span className={`flex-1 min-w-0 truncate ${blackWon ? "font-semibold" : "text-muted"}`}>
-                        <PlayerLink id={g.blackId} name={b} />
-                        <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-1.5" />
-                      </span>
-                      <span className="text-[11px] text-muted whitespace-nowrap hidden sm:inline">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Section>
-        </div>
+        )}
       </div>
     </>
   );

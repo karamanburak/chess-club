@@ -59,4 +59,16 @@ describe("checkHealth", () => {
     const r = checkHealth(d, { ...(await import("../health")).DEFAULT_HEALTH_MSGS, ratingDrift: "Wertung von {name} stimmt nicht" });
     expect(r.problems[0].text).toBe("Wertung von A stimmt nicht");
   });
+
+  test("flags challenges that point at missing players or games", () => {
+    const d = healthy();
+    const base = { at: "2026-01-01T18:00:00.000Z", place: "", timeControl: "", note: "", proposedBy: "a", whiteId: null, rated: true, createdAt: "x", updatedAt: "x" };
+    d.challenges = [
+      { ...base, id: "c1", fromId: "a", toId: "ghost", status: "pending", gameId: null },
+      { ...base, id: "c2", fromId: "a", toId: "b", status: "played", gameId: "gone" },
+    ];
+    const codes = checkHealth(d).problems.map((p) => p.code);
+    expect(codes).toContain("challengePlayerMissing");
+    expect(codes).toContain("challengeGameMissing");
+  });
 });

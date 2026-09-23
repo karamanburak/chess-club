@@ -133,37 +133,41 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
             </Section>
           ) : (
             <Section title={t.players.list.joinClub}>
-              <form action={registerSelf} className="flex flex-col gap-3">
-                <p className="text-xs text-muted -mt-1">
-                  {t.players.list.newHere}{" "}
-                  <Link href="/me" className="text-accent hover:underline">
-                    {t.players.list.pickYourFace}
-                  </Link>{" "}
-                  {t.players.list.instead}
-                </p>
-                <div>
-                  <label className="label" htmlFor="name">
-                    {t.players.list.yourName}
-                  </label>
-                  <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
+              {db.settings.selfSignupOff ? (
+                <p className="text-sm text-muted">{t.errors.signupClosed}</p>
+              ) : (
+                <form action={registerSelf} className="flex flex-col gap-3">
+                  <p className="text-xs text-muted -mt-1">
+                    {t.players.list.newHere}{" "}
+                    <Link href="/me" className="text-accent hover:underline">
+                      {t.players.list.pickYourFace}
+                    </Link>{" "}
+                    {t.players.list.instead}
+                  </p>
                   <div>
-                    <label className="label" htmlFor="pin">
-                      {t.players.list.pin4}
+                    <label className="label" htmlFor="name">
+                      {t.players.list.yourName}
                     </label>
-                    <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                    <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
                   </div>
-                  <div>
-                    <label className="label" htmlFor="confirm">
-                      {t.players.list.repeat}
-                    </label>
-                    <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label" htmlFor="pin">
+                        {t.players.list.pin4}
+                      </label>
+                      <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                    </div>
+                    <div>
+                      <label className="label" htmlFor="confirm">
+                        {t.players.list.repeat}
+                      </label>
+                      <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                    </div>
                   </div>
-                </div>
-                <p className="text-xs text-muted">{fmt(t.players.list.startHint, { rating: db.settings.startRating })}</p>
-                <SubmitButton pendingText={t.players.list.joining}>{t.players.list.joinClub}</SubmitButton>
-              </form>
+                  <p className="text-xs text-muted">{fmt(t.players.list.startHint, { rating: db.settings.startRating })}</p>
+                  <SubmitButton pendingText={t.players.list.joining}>{t.players.list.joinClub}</SubmitButton>
+                </form>
+              )}
             </Section>
           )}
 

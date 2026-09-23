@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_NTFY_URL, ntfyLabel, ntfyRequest, ntfyServer, ntfyTopic, sendNotifications, type Notification } from "../notify";
+import { DEFAULT_NTFY_URL, ntfyLabel, ntfyRequest, ntfyServer, ntfyTopic, PLAYER_TOPIC_RE, sendNotifications, type Notification } from "../notify";
 
 const note: Notification = { text: "Ali challenged Veli", title: "Türkischer Schachclub", admin: false, url: "https://club.example/admin#activity" };
 
@@ -79,5 +79,29 @@ describe("sendNotifications", () => {
       globalThis.fetch = original;
       console.warn = warn;
     }
+  });
+});
+
+describe("personal topics", () => {
+  test("a player's line goes to their own topic, even when the club has none", async () => {
+    expect(JSON.parse(ntfyRequest({ ...note, topic: "burak-7f3k9q2m" }, { NTFY_TOPIC: "club" }).init.body as string).topic).toBe("burak-7f3k9q2m");
+    const original = globalThis.fetch;
+    const sent: string[] = [];
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      sent.push(JSON.parse(init.body as string).topic);
+      return new Response("", { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      // no club topic: the club line is skipped, the personal one still goes out
+      await sendNotifications([note, { ...note, text: "for you", topic: "burak-7f3k9q2m" }], {});
+      expect(sent).toEqual(["burak-7f3k9q2m"]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("topics are ntfy's alphabet, 8 to 64 long", () => {
+    for (const ok of ["burak-7f3k9q2m", "a_b-C_d1", "x".repeat(64)]) expect(PLAYER_TOPIC_RE.test(ok)).toBe(true);
+    for (const bad of ["short", "has space here", "ntfy.sh/topic", "x".repeat(65), ""]) expect(PLAYER_TOPIC_RE.test(bad)).toBe(false);
   });
 });

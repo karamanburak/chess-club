@@ -28,6 +28,8 @@ export const DEFAULT_HEALTH_MSGS = {
   koWinnerNeither: "Knockout {tournament}, round {round} match {slot}: winner {name} is neither side.",
   presentMissing: "Club night {session}: present player {id} does not exist.",
   sessionGameMissing: "Club night {session}, round {round}: game {game} is missing.",
+  challengePlayerMissing: "Challenge {challenge}: player {id} does not exist.",
+  challengeGameMissing: "Challenge {challenge}: marked played, but game {game} is missing.",
   ratingDrift: "Player {name}: stored {stored} but a replay gives {replay}. A write skipped the rating recompute; the next result fixes it.",
 };
 export type HealthMsgs = typeof DEFAULT_HEALTH_MSGS;
@@ -100,6 +102,11 @@ export function checkHealth(input: Database, m: HealthMsgs = DEFAULT_HEALTH_MSGS
   for (const s of db.sessions) {
     for (const pid of s.presentIds) if (!playerIds.has(pid)) warn("presentMissing", { session: short(s.id), id: pid });
     for (const r of s.rounds) for (const p of r.pairings) if (!gameIds.has(p.gameId)) warn("sessionGameMissing", { session: short(s.id), round: r.number, game: short(p.gameId) });
+  }
+  for (const c of db.challenges) {
+    for (const pid of [c.fromId, c.toId]) if (!playerIds.has(pid)) warn("challengePlayerMissing", { challenge: short(c.id), id: pid });
+    if (c.status === "played" && c.gameId && !gameIds.has(c.gameId)) warn("challengeGameMissing", { challenge: short(c.id), game: short(c.gameId) });
+    for (const gid of c.gameIds ?? []) if (!gameIds.has(gid)) warn("challengeGameMissing", { challenge: short(c.id), game: short(gid) });
   }
 
   const replay = structuredClone(db);

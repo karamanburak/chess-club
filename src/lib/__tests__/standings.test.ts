@@ -85,3 +85,20 @@ describe("standings", () => {
     expect(ba.map((c) => c.score)).toEqual([0, 0]);
   });
 });
+
+describe("monthTable", () => {
+  test("uses the club's month, not UTC, and skips forfeits", async () => {
+    const { monthTable } = await import("../queries");
+    // 22:30 UTC on 30 Sep is 00:30 on 1 Oct in Berlin (CEST).
+    const late = game("a", "b", "1-0", { completedAt: "2026-09-30T22:30:00.000Z" });
+    const forfeit = game("a", "b", "+/-", { completedAt: "2026-10-05T12:00:00.000Z" });
+    const d = db([player("a"), player("b")], [late, forfeit]);
+    recomputeRatings(d);
+    expect(monthTable(d, "2026-09")).toEqual([]);
+    const oct = monthTable(d, "2026-10");
+    expect(oct.map((r) => [r.playerId, r.games, r.points])).toEqual([
+      ["a", 1, 1],
+      ["b", 1, 0],
+    ]);
+  });
+});

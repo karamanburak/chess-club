@@ -3,7 +3,8 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { mutate, readDb } from "./db";
 import { UserError } from "./errors";
-import { ADMIN_COOKIE, ADMIN_DAYS, bindFor, createToken, isAdminToken, ME_COOKIE, ME_DAYS, MEMBER_COOKIE, MEMBER_DAYS, verifyToken } from "./tokens";
+import { requestOrigin } from "./request-url";
+import { ADMIN_COOKIE, ADMIN_HOURS, bindFor, createToken, isAdminToken, ME_COOKIE, ME_DAYS, MEMBER_COOKIE, MEMBER_DAYS, verifyToken } from "./tokens";
 
 export { ADMIN_COOKIE as SESSION_COOKIE };
 
@@ -19,6 +20,11 @@ export function verifyPassword(password: string, stored: string): boolean {
   const candidate = scryptSync(password, salt, 64);
   const expected = Buffer.from(hash, "hex");
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
+/** Cookies carry `Secure` whenever the request came in over HTTPS (Vercel); plain HTTP on the club Wi-Fi keeps working. */
+export async function secureCookies(): Promise<boolean> {
+  return (await requestOrigin()).startsWith("https:");
 }
 
 async function getSecret(): Promise<string> {
@@ -55,11 +61,12 @@ export async function setSessionCookie(): Promise<void> {
   const jar = await cookies();
   const hash = (await readDb()).settings.adminPasswordHash;
   if (!hash) throw new Error("No admin password configured.");
-  jar.set(ADMIN_COOKIE, createToken({ role: "admin", exp: Date.now() + ADMIN_DAYS * 86400_000, bind: bindFor(hash) }, await getSecret()), {
+  jar.set(ADMIN_COOKIE, createToken({ role: "admin", exp: Date.now() + ADMIN_HOURS * 3600_000, bind: bindFor(hash) }, await getSecret()), {
     httpOnly: true,
     sameSite: "lax",
+    secure: await secureCookies(),
     path: "/",
-    maxAge: ADMIN_DAYS * 86400,
+    maxAge: ADMIN_HOURS * 3600,
   });
 }
 
@@ -83,10 +90,6 @@ export async function rotateSessionSecret(): Promise<string> {
 /* Member code: one shared code for the whole club                     */
 /* ------------------------------------------------------------------ */
 
-export async function memberCodeRequired(): Promise<boolean> {
-  return !!(await readDb()).settings.memberCodeHash;
-}
-
 /** True when this browser may use the club: no code configured, a valid member cookie, or an admin. */
 export async function isMember(): Promise<boolean> {
   const db = await readDb();
@@ -103,6 +106,7 @@ export async function setMemberCookie(codeHash: string): Promise<void> {
   jar.set(MEMBER_COOKIE, createToken({ role: "member", exp: Date.now() + MEMBER_DAYS * 86400_000, bind: bindFor(codeHash) }, await getSecret()), {
     httpOnly: true,
     sameSite: "lax",
+    secure: await secureCookies(),
     path: "/",
     maxAge: MEMBER_DAYS * 86400,
   });
@@ -112,20 +116,26 @@ export async function setMemberCookie(codeHash: string): Promise<void> {
 /* "This is me": a device claims one player                            */
 /* ------------------------------------------------------------------ */
 
-/** The player this browser claims to be, if any and if they still exist. */
+/**
+ * The player this browser claims to be, if any and if they still exist. The cookie is bound to the player's PIN hash,
+ * so a new PIN (their own change or the admin's reset) signs every other device of that player out.
+ */
 export async function currentPlayerId(): Promise<string | null> {
   const jar = await cookies();
   const token = verifyToken(jar.get(ME_COOKIE)?.value, await getSecret());
   if (!token || token.role !== "self" || !token.playerId) return null;
   const db = await readDb();
-  return db.players.some((p) => p.id === token.playerId) ? token.playerId : null;
+  const p = db.players.find((x) => x.id === token.playerId);
+  return p?.pinHash && token.bind === bindFor(p.pinHash) ? p.id : null;
 }
 
-export async function setMeCookie(playerId: string): Promise<void> {
+/** Issues "this is me" for the given PIN hash; pass the hash just written, readDb() is cached for the request. */
+export async function setMeCookie(playerId: string, pinHash: string): Promise<void> {
   const jar = await cookies();
-  jar.set(ME_COOKIE, createToken({ role: "self", exp: Date.now() + ME_DAYS * 86400_000, playerId }, await getSecret()), {
+  jar.set(ME_COOKIE, createToken({ role: "self", exp: Date.now() + ME_DAYS * 86400_000, playerId, bind: bindFor(pinHash) }, await getSecret()), {
     httpOnly: true,
     sameSite: "lax",
+    secure: await secureCookies(),
     path: "/",
     maxAge: ME_DAYS * 86400,
   });

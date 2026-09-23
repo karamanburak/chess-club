@@ -1,17 +1,20 @@
 import os from "node:os";
+import { localPath } from "@/lib/safe-path";
+import type React from "react";
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/icons";
 import { listBackups, readDb, STORAGE_KIND } from "@/lib/db";
 import { adminConfigured, isAdmin } from "@/lib/auth";
-import { changePassword, clearMemberCode, closeSeason, createSnapshot, importDatabase, login, logout, mergePlayers, removeBackup, renameSeason, reopenSeason, resetAdminPassword, resetData, restoreBackup, setMemberCode, setOwnerPassword, setupAdmin, signOutEverywhere, startSeason, updateClub, updateSettings } from "@/lib/actions";
+import { changePassword, clearMemberCode, clearOwnerPassword, setSwitch, closeSeason, createSnapshot, importDatabase, login, logout, mergePlayers, removeBackup, renameSeason, reopenSeason, resetAdminPassword, resetData, restoreBackup, setMemberCode, setOwnerPassword, setupAdmin, signOutEverywhere, startSeason, updateClub, updateSettings } from "@/lib/actions";
 import { currentSeason, seasonTable, seasonOverdue } from "@/lib/club";
 import { RESET_SCOPES, resetCounts } from "@/lib/reset";
 import { requestOrigin } from "@/lib/request-url";
-import { ntfyLabel } from "@/lib/notify";
+import { ntfyLabel, ntfyTopic } from "@/lib/notify";
 import { localDay } from "@/lib/time";
 import { checkHealth } from "@/lib/health";
 import { Qr } from "@/components/Qr";
 import { MergePlayersFields } from "@/components/MergePlayersFields";
+import { RecordPastGame } from "@/components/RecordPastGame";
 import { pickableWithGames } from "@/lib/pick";
 import { formatDate, playerMap } from "@/lib/queries";
 import { formatDateTime, TIEBREAK_PRESETS } from "@/lib/queries";
@@ -37,6 +40,8 @@ const TONES: Record<string, "error" | "ok"> = {
   club: "ok",
   member: "ok",
   memberoff: "ok",
+  owneroff: "ok",
+  switched: "ok",
   codeshort: "error",
   codemismatch: "error",
   season: "ok",
@@ -85,6 +90,8 @@ const MESSAGE_TAB: Record<string, AdminTab> = {
   wrong: "security",
   member: "security",
   memberoff: "security",
+  owneroff: "club",
+  switched: "club",
   codeshort: "security",
   codemismatch: "security",
   everyoneout: "security",
@@ -107,7 +114,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const a = t.admin;
   const msgKey = typeof sp.error === "string" ? sp.error : typeof sp.ok === "string" ? sp.ok : null;
   const msg = msgKey && msgKey in TONES ? { tone: TONES[msgKey], text: a.messages[msgKey as keyof typeof a.messages] } : null;
-  const next = typeof sp.next === "string" ? sp.next : "";
+  const next = localPath(sp.next, "");
   const configured = await adminConfigured();
   const admin = await isAdmin();
   const db = await readDb();
@@ -124,12 +131,12 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
           <form action={setupAdmin} className="flex flex-col gap-3">
             {Banner}
             <div>
-              <label className="label">{a.setup.password}</label>
-              <input name="password" type="password" required minLength={4} className="w-full" autoFocus autoComplete="new-password" />
+              <label htmlFor="f-setup-password" className="label">{a.setup.password}</label>
+              <input id="f-setup-password" name="password" type="password" required minLength={4} className="w-full" autoFocus autoComplete="new-password" />
             </div>
             <div>
-              <label className="label">{a.setup.repeat}</label>
-              <input name="confirm" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
+              <label htmlFor="f-setup-repeat" className="label">{a.setup.repeat}</label>
+              <input id="f-setup-repeat" name="confirm" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
             </div>
             <p className="text-xs text-muted">
               {a.setup.stored} <code className="font-mono">data/db.json</code>. {a.setup.nothingLeaves}
@@ -155,24 +162,24 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               {recoveryOn ? (
                 <form action={resetAdminPassword} className="flex flex-col gap-3">
                   <div>
-                    <label className="label">{a.recover.token}</label>
-                    <input name="token" type="password" required className="w-full font-mono" autoFocus autoComplete="off" />
+                    <label htmlFor="f-recover-token" className="label">{a.recover.token}</label>
+                    <input id="f-recover-token" name="token" type="password" required className="w-full font-mono" autoFocus autoComplete="off" />
                   </div>
                   <div>
-                    <label className="label">{a.recover.which}</label>
-                    <select name="which" defaultValue="admin" className="w-full">
+                    <label htmlFor="f-recover-which" className="label">{a.recover.which}</label>
+                    <select id="f-recover-which" name="which" defaultValue="admin" className="w-full">
                       <option value="admin">{a.recover.whichAdmin}</option>
                       <option value="owner">{a.recover.whichOwner}</option>
                     </select>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="label">{a.recover.password}</label>
-                      <input name="password" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
+                      <label htmlFor="f-recover-password" className="label">{a.recover.password}</label>
+                      <input id="f-recover-password" name="password" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
                     </div>
                     <div>
-                      <label className="label">{a.recover.repeat}</label>
-                      <input name="confirm" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
+                      <label htmlFor="f-recover-repeat" className="label">{a.recover.repeat}</label>
+                      <input id="f-recover-repeat" name="confirm" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
                     </div>
                   </div>
                   <SubmitButton pendingText={t.common.saving}>{a.recover.submit}</SubmitButton>
@@ -215,7 +222,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   const filtering = q !== "" || who !== "";
   const matching = [...db.activity].reverse().filter((x) => (who === "" || (who === "admin") === x.admin) && (q === "" || x.text.toLowerCase().includes(q.toLowerCase())));
   const activity = showAll ? matching : matching.slice(0, ACTIVITY_PREVIEW);
-  const ntfy = ntfyLabel();
+  const ntfy = db.settings.clubNotifyOff ? null : ntfyLabel();
   const activityQuery = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
     p.set("tab", "security");
@@ -234,11 +241,60 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   /** Owner password field for forms that reach a gated action; nothing while no owner password exists. */
   const OwnerField = ownerSet ? (
     <div>
-      <label className="label">{a.owner.prompt}</label>
-      <input name="owner" type="password" required className="w-full" autoComplete="off" />
+      <label htmlFor="f-owner-prompt" className="label">{a.owner.prompt}</label>
+      <input id="f-owner-prompt" name="owner" type="password" required className="w-full" autoComplete="off" />
     </div>
   ) : null;
   const ownerPrompt = ownerSet ? a.owner.prompt : undefined;
+  const sw = a.switches;
+  /** One row per switch: what it is, whether it is on, and the one button that flips it. */
+  const switchRow = ({ label, hint, on, control, note }: { label: string; hint: string; on: boolean | null; control: React.ReactNode; note?: string }) => (
+    <li key={label} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-line/70 px-4 py-3">
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 font-medium">
+          {label}
+          <span className={`badge ${on === null ? "text-muted" : on ? "border-win/40 text-win" : "text-muted"}`}>{on === null ? sw.notSetUp : on ? sw.on : sw.off}</span>
+        </span>
+        <span className="block text-xs text-muted">{note ?? hint}</span>
+      </span>
+      <span className="shrink-0">{control}</span>
+    </li>
+  );
+  const toggle = (key: "selfSignup" | "clubNotify" | "memberNotify", on: boolean) => (
+    <form action={setSwitch.bind(null, key, !on)}>
+      <SubmitButton className={on ? "btn btn-sm" : "btn btn-sm btn-primary"} pendingText="…">
+        {on ? sw.turnOff : sw.turnOn}
+      </SubmitButton>
+    </form>
+  );
+  const clubFeedReady = !!ntfyTopic();
+  const Switches = (
+    <Section title={sw.title} right={<span className="text-xs text-muted">{sw.hint}</span>}>
+      <ul className="grid gap-2 lg:grid-cols-2 text-sm">
+        {switchRow({ label: sw.owner.label, hint: sw.owner.hint, on: ownerSet, control: ownerSet ? (
+              <ConfirmButton action={clearOwnerPassword} className="btn btn-sm" confirmLabel={sw.turnOff} password={a.owner.prompt}>
+                {sw.turnOff}
+              </ConfirmButton>
+            ) : (
+              <Link href="/admin?tab=security#owner" className="btn btn-sm btn-primary">
+                {sw.setUp}
+              </Link>
+            ) })}
+        {switchRow({ label: sw.member.label, hint: sw.member.hint, on: !!db.settings.memberCodeHash, control: db.settings.memberCodeHash ? (
+              <ConfirmButton action={clearMemberCode} className="btn btn-sm" confirmLabel={sw.turnOff} password={ownerPrompt}>
+                {sw.turnOff}
+              </ConfirmButton>
+            ) : (
+              <Link href="/admin?tab=security#member" className="btn btn-sm btn-primary">
+                {sw.setUp}
+              </Link>
+            ) })}
+        {switchRow({ label: sw.signup.label, hint: sw.signup.hint, on: !db.settings.selfSignupOff, control: toggle("selfSignup", !db.settings.selfSignupOff) })}
+        {switchRow({ label: sw.clubNotify.label, hint: sw.clubNotify.hint, on: clubFeedReady ? !db.settings.clubNotifyOff : null, note: clubFeedReady ? undefined : sw.clubNotify.missing, control: clubFeedReady ? toggle("clubNotify", !db.settings.clubNotifyOff) : null })}
+        {switchRow({ label: sw.memberNotify.label, hint: sw.memberNotify.hint, on: !db.settings.memberNotifyOff, control: toggle("memberNotify", !db.settings.memberNotifyOff) })}
+      </ul>
+    </Section>
+  );
   const club = db.settings.club;
   const season = currentSeason(db);
   const seasonTop = season ? seasonTable(db, season)[0] : null;
@@ -278,26 +334,27 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
         ))}
       </nav>
 
+      {tab === "club" && <div className="mb-6">{Switches}</div>}
       {tab === "club" && (
         <div className="grid gap-6 md:grid-cols-2">
           <div className="col-stack">
             <Section title={a.identity.title}>
               <form action={updateClub} className="flex flex-col gap-3">
                 <div>
-                  <label className="label">{a.identity.name}</label>
-                  <input name="name" defaultValue={club.name} required className="w-full" />
+                  <label htmlFor="f-identity-name" className="label">{a.identity.name}</label>
+                  <input id="f-identity-name" name="name" defaultValue={club.name} required className="w-full" />
                 </div>
                 <div>
-                  <label className="label">{a.identity.nextNight}</label>
-                  <input name="nextNight" type="date" defaultValue={club.nextNight} className="w-full" />
+                  <label htmlFor="f-identity-nextNight" className="label">{a.identity.nextNight}</label>
+                  <input id="f-identity-nextNight" name="nextNight" type="date" defaultValue={club.nextNight} className="w-full" />
                 </div>
                 <div>
-                  <label className="label">{a.identity.meets}</label>
-                  <input name="meets" defaultValue={club.meets} className="w-full" placeholder={a.identity.meetsPlaceholder} />
+                  <label htmlFor="f-identity-meets" className="label">{a.identity.meets}</label>
+                  <input id="f-identity-meets" name="meets" defaultValue={club.meets} className="w-full" placeholder={a.identity.meetsPlaceholder} />
                 </div>
                 <div>
-                  <label className="label">{a.identity.notice}</label>
-                  <textarea name="announcement" defaultValue={club.announcement} maxLength={300} rows={2} className="w-full" placeholder={a.identity.noticePlaceholder} />
+                  <label htmlFor="f-identity-notice" className="label">{a.identity.notice}</label>
+                  <textarea id="f-identity-notice" name="announcement" defaultValue={club.announcement} maxLength={300} rows={2} className="w-full" placeholder={a.identity.noticePlaceholder} />
                 </div>
                 <SubmitButton className="btn" pendingText={t.common.saving}>
                   {a.identity.save}
@@ -308,20 +365,20 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               <form action={updateSettings} className="flex flex-col gap-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="label">{a.settings.startRating}</label>
-                    <input name="startRating" type="number" min={100} max={3000} defaultValue={db.settings.startRating} className="w-full" />
+                    <label htmlFor="f-settings-startRating" className="label">{a.settings.startRating}</label>
+                    <input id="f-settings-startRating" name="startRating" type="number" min={100} max={3000} defaultValue={db.settings.startRating} className="w-full" />
                   </div>
                   <div>
-                    <label className="label">{a.settings.byePoints}</label>
-                    <select name="byePoints" defaultValue={String(db.settings.byePoints)} className="w-full">
+                    <label htmlFor="f-settings-byePoints" className="label">{a.settings.byePoints}</label>
+                    <select id="f-settings-byePoints" name="byePoints" defaultValue={String(db.settings.byePoints)} className="w-full">
                       <option value="1">{a.settings.onePoint}</option>
                       <option value="0.5">{a.settings.halfPoint}</option>
                     </select>
                   </div>
                 </div>
                 <div>
-                  <label className="label">{a.settings.tiebreaks}</label>
-                  <select name="tiebreaks" defaultValue={presetKey} className="w-full">
+                  <label htmlFor="f-settings-tiebreaks" className="label">{a.settings.tiebreaks}</label>
+                  <select id="f-settings-tiebreaks" name="tiebreaks" defaultValue={presetKey} className="w-full">
                     {TIEBREAK_PRESETS.map((p) => (
                       <option key={p.key} value={p.key}>
                         {presetLabel(p.key, p.label)}
@@ -330,8 +387,8 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                   </select>
                 </div>
                 <div>
-                  <label className="label">{a.settings.language}</label>
-                  <select name="language" defaultValue={db.settings.language ?? "en"} className="w-full">
+                  <label htmlFor="f-settings-language" className="label">{a.settings.language}</label>
+                  <select id="f-settings-language" name="language" defaultValue={db.settings.language ?? "en"} className="w-full">
                     {LANGS.map((l) => (
                       <option key={l} value={l}>
                         {LANG_NAMES[l]}
@@ -579,6 +636,9 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                 )}
               </div>
             </Section>
+            <Section title={t.games.past.title}>
+              <RecordPastGame players={db.players} />
+            </Section>
           </div>
         </div>
       )}
@@ -586,7 +646,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       {tab === "security" && (
         <div className="grid gap-6 md:grid-cols-2">
           <div className="col-stack">
-            <Section title={a.owner.title}>
+            <Section title={<span id="owner">{a.owner.title}</span>}>
               <form action={setOwnerPassword} className="flex flex-col gap-3">
                 <div className={`rounded-xl border px-4 py-2.5 text-xs ${ownerSet ? "border-win/40 bg-win/5 text-muted" : "border-accent/50 bg-accent/5 text-fg"}`}>
                   {ownerSet ? a.owner.setHint : a.owner.notSet}
@@ -594,18 +654,18 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                 {!ownerSet && <p className="text-xs text-muted">{a.owner.notSetHint}</p>}
                 {ownerSet && (
                   <div>
-                    <label className="label">{a.owner.current}</label>
-                    <input name="current" type="password" required className="w-full" autoComplete="off" />
+                    <label htmlFor="f-owner-current" className="label">{a.owner.current}</label>
+                    <input id="f-owner-current" name="current" type="password" required className="w-full" autoComplete="off" />
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="label">{a.owner.next}</label>
-                    <input name="password" type="password" required minLength={6} className="w-full" autoComplete="new-password" />
+                    <label htmlFor="f-owner-next" className="label">{a.owner.next}</label>
+                    <input id="f-owner-next" name="password" type="password" required minLength={6} className="w-full" autoComplete="new-password" />
                   </div>
                   <div>
-                    <label className="label">{a.owner.repeat}</label>
-                    <input name="confirm" type="password" required minLength={6} className="w-full" autoComplete="new-password" />
+                    <label htmlFor="f-owner-repeat" className="label">{a.owner.repeat}</label>
+                    <input id="f-owner-repeat" name="confirm" type="password" required minLength={6} className="w-full" autoComplete="new-password" />
                   </div>
                 </div>
                 <SubmitButton className={ownerSet ? "btn" : "btn btn-primary"} pendingText={t.common.saving}>
@@ -616,17 +676,17 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             <Section title={a.password.title}>
               <form action={changePassword} className="flex flex-col gap-3">
                 <div>
-                  <label className="label">{a.password.current}</label>
-                  <input name="current" type="password" required className="w-full" autoComplete="current-password" />
+                  <label htmlFor="f-password-current" className="label">{a.password.current}</label>
+                  <input id="f-password-current" name="current" type="password" required className="w-full" autoComplete="current-password" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="label">{a.password.next}</label>
-                    <input name="password" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
+                    <label htmlFor="f-password-next" className="label">{a.password.next}</label>
+                    <input id="f-password-next" name="password" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
                   </div>
                   <div>
-                    <label className="label">{a.password.repeat}</label>
-                    <input name="confirm" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
+                    <label htmlFor="f-password-repeat" className="label">{a.password.repeat}</label>
+                    <input id="f-password-repeat" name="confirm" type="password" required minLength={4} className="w-full" autoComplete="new-password" />
                   </div>
                 </div>
                 {OwnerField}
@@ -636,7 +696,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                 <p className="text-xs text-muted">{a.sessions.passwordHint}</p>
               </form>
             </Section>
-            <Section title={a.member.title}>
+            <Section title={<span id="member">{a.member.title}</span>}>
               <div className="flex flex-col gap-3 text-sm">
                 <p className="text-muted text-xs">{a.member.hint}</p>
                 <div className={`rounded-xl border px-4 py-2.5 flex items-center justify-between gap-3 ${db.settings.memberCodeHash ? "border-win/40 bg-win/5" : "border-line"}`}>
@@ -649,12 +709,12 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                 </div>
                 <form action={setMemberCode} className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="label">{db.settings.memberCodeHash ? a.member.newCode : a.member.code}</label>
-                    <input name="code" type="text" required minLength={4} className="w-full" autoComplete="off" placeholder={a.member.codePlaceholder} />
+                    <label htmlFor="f-settings-memberCodeHash-a-member-newCode-a-member-code" className="label">{db.settings.memberCodeHash ? a.member.newCode : a.member.code}</label>
+                    <input id="f-settings-memberCodeHash-a-member-newCode-a-member-code" name="code" type="text" required minLength={4} className="w-full" autoComplete="off" placeholder={a.member.codePlaceholder} />
                   </div>
                   <div>
-                    <label className="label">{a.member.repeat}</label>
-                    <input name="confirm" type="text" required minLength={4} className="w-full" autoComplete="off" />
+                    <label htmlFor="f-member-repeat" className="label">{a.member.repeat}</label>
+                    <input id="f-member-repeat" name="confirm" type="text" required minLength={4} className="w-full" autoComplete="off" />
                   </div>
                   {OwnerField && <div className="col-span-2">{OwnerField}</div>}
                   <SubmitButton className="btn col-span-2" pendingText={t.common.saving}>

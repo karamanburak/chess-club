@@ -154,3 +154,37 @@ describe("avatars", () => {
     expect(pickAvatar("id-1")).toBe("id-1");
   });
 });
+
+describe("swiss rematch avoidance", () => {
+  test("finds the rematch-free pairing even when the scores are all different", () => {
+    // A–B and B–D met already. Greedy in score order takes A–C and is left with the rematch B–D.
+    const players = [
+      { id: "A", score: 2, rating: 1500 },
+      { id: "B", score: 1.5, rating: 1500 },
+      { id: "C", score: 1, rating: 1500 },
+      { id: "D", score: 0.5, rating: 1500 },
+    ];
+    for (let i = 0; i < 20; i++) {
+      const out = generatePairings({ players, previousPairs: new Set([pairKey("A", "B"), pairKey("B", "D")]), colorStats: new Map(), byeHistory: new Set(), mode: "swiss" });
+      expect(out.rematches).toBe(0);
+      expect(out.pairs.map((p) => pairKey(p.whiteId, p.blackId)).sort()).toEqual([pairKey("A", "D"), pairKey("B", "C")].sort());
+    }
+  });
+
+  test("keeps score neighbours together when there is no rematch to avoid", () => {
+    const players = ["a", "b", "c", "d", "e", "f"].map((id, i) => ({ id, score: 5 - i, rating: 1500 }));
+    const out = generatePairings({ players, previousPairs: new Set(), colorStats: new Map(), byeHistory: new Set(), mode: "swiss" });
+    expect(out.pairs.map((p) => pairKey(p.whiteId, p.blackId)).sort()).toEqual([pairKey("a", "b"), pairKey("c", "d"), pairKey("e", "f")].sort());
+  });
+
+  test("stays fast for a big late round with many earlier meetings", () => {
+    const players = Array.from({ length: 40 }, (_, i) => ({ id: `p${i}`, score: Math.floor(i / 5), rating: 2000 - i }));
+    const met = new Set<string>();
+    for (let i = 0; i < 40; i++) for (let j = i + 1; j < Math.min(40, i + 8); j++) met.add(pairKey(`p${i}`, `p${j}`));
+    const started = performance.now();
+    const out = generatePairings({ players, previousPairs: met, colorStats: new Map(), byeHistory: new Set(), mode: "swiss" });
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(out.pairs.length).toBe(20);
+    expect(out.rematches).toBe(0);
+  });
+});

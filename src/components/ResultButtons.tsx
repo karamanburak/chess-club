@@ -82,6 +82,7 @@ export function ResultButtons({
             disabled={disabled}
             title={active && allowClear ? t.pairing.clickToClear : t.pairing[o.title]}
             onClick={() => choose(o.value)}
+            aria-pressed={active}
             className={`font-mono font-medium border transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${base} ${
               active
                 ? "bg-accent text-accent-fg border-accent"

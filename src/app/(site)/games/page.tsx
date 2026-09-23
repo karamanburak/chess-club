@@ -8,12 +8,15 @@ import { deleteGame } from "@/lib/actions";
 import { completedGames, formatDateTime, formatMonth, monthsWithGames, playerMap, resultLabel } from "@/lib/queries";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ResultButtons } from "@/components/ResultButtons";
-import { RecordPastGame } from "@/components/RecordPastGame";
+import { MonthSelect } from "@/components/MonthSelect";
 import { SearchBox } from "@/components/SearchBox";
 import { Empty, PageHeader, PlayerLink, RatingDelta, Section } from "@/components/ui";
+import { localMonth } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 const PAGE = 50;
+/** Recent months shown as buttons; older ones go into one dropdown, so the row never grows. */
+const MONTH_CHIPS = 3;
 
 export default async function GamesPage({ searchParams }: PageProps<"/games">) {
   const sp = await searchParams;
@@ -32,10 +35,14 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
   if (kind === "tournament") games = games.filter((g) => g.tournamentId);
   if (kind === "night") games = games.filter((g) => g.sessionId);
   if (kind === "friendly") games = games.filter((g) => !g.tournamentId && !g.sessionId);
-  if (month) games = games.filter((g) => g.completedAt?.startsWith(month));
+  // Months in club time: a game finished at 00:30 on 1 October (Berlin) belongs to October, not to September in UTC.
+  if (month) games = games.filter((g) => !!g.completedAt && localMonth(new Date(g.completedAt)) === month);
   const total = games.length;
   const pages = Math.max(1, Math.ceil(total / PAGE));
   games = games.slice((page - 1) * PAGE, page * PAGE);
+
+  const months = monthsWithGames(db);
+  const monthLabel = (m: string) => `${formatMonth(m, lang).slice(0, 3)} ${m.slice(0, 4)}`;
 
   const link = (over: Record<string, string | number | undefined>) => {
     const p = new URLSearchParams();
@@ -98,17 +105,28 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
             {l}
           </Link>
         ))}
-        <span className="mx-1 text-line">|</span>
-        <Link href={link({ month: "" })} className={`btn btn-sm ${!month ? "btn-primary" : "btn-ghost"}`}>
-          {t.games.anyMonth}
-        </Link>
-        {monthsWithGames(db)
-          .slice(0, 6)
-          .map((m) => (
-            <Link key={m} href={link({ month: m })} className={`btn btn-sm ${month === m ? "btn-primary" : "btn-ghost"}`}>
-              {formatMonth(m, lang).slice(0, 3)} {m.slice(2, 4)}
+        {/* One month only: the filter would repeat "All", so it stays away until there is a second month. */}
+        {(months.length > 1 || month) && (
+          <>
+            <span className="mx-1 text-line">|</span>
+            <Link href={link({ month: "" })} className={`btn btn-sm ${!month ? "btn-primary" : ""}`}>
+              {t.games.anyMonth}
             </Link>
-          ))}
+            {months.slice(0, MONTH_CHIPS).map((m) => (
+              <Link key={m} href={link({ month: m })} className={`btn btn-sm ${month === m ? "btn-primary" : ""}`}>
+                {monthLabel(m)}
+              </Link>
+            ))}
+            {months.length > MONTH_CHIPS && (
+              <MonthSelect
+                options={months.slice(MONTH_CHIPS).map((m) => ({ value: m, label: monthLabel(m), href: link({ month: m }) }))}
+                value={month}
+                label={t.games.earlierMonths}
+                placeholder={t.games.earlierMonths}
+              />
+            )}
+          </>
+        )}
       </div>
 
       <Section title={t.games.results} flush right={pages > 1 ? <Pager page={page} pages={pages} link={link} labels={{ prev: t.games.prevPage, next: t.games.nextPage }} /> : undefined}>
@@ -213,13 +231,6 @@ export default async function GamesPage({ searchParams }: PageProps<"/games">) {
           </div>
         )}
       </Section>
-      {admin && (
-        <div className="mt-6 grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
-          <Section title={t.games.past.title}>
-            <RecordPastGame players={db.players} />
-          </Section>
-        </div>
-      )}
     </>
   );
 }

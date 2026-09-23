@@ -74,10 +74,55 @@ function greedyPair(order: PairingCandidate[], hard: Set<string>, soft: Set<stri
   return { pairs, cost };
 }
 
-function orderFor(mode: "random" | "swiss", pool: PairingCandidate[]): PairingCandidate[] {
-  const shuffled = shuffle(pool);
-  if (mode === "random") return shuffled;
-  return shuffled.sort((a, b) => b.score - a.score || b.rating - a.rating);
+/** Nodes the Swiss search may visit before it settles for the best pairing found so far (a few ms). */
+const SWISS_BUDGET = 200_000;
+
+/**
+ * Swiss: the pairing with the fewest rematches (hard, then soft) and, among those, the smallest score gaps, found by
+ * a depth-first search with pruning. Neighbours in the standings are tried first, so the first complete pairing is
+ * the greedy one and the search only ever improves on it. A shuffle cannot do this: the score order undoes it.
+ */
+function swissPair(pool: PairingCandidate[], hard: Set<string>, soft: Set<string>) {
+  const order = [...pool].sort((a, b) => b.score - a.score || b.rating - a.rating);
+  const n = order.length;
+  const pairCost = (i: number, j: number) => {
+    const k = pairKey(order[i].id, order[j].id);
+    return hard.has(k) ? HARD : soft.has(k) ? SOFT : 0;
+  };
+  // Half-points apart, then places apart: keeps players in their score group.
+  const gap = (i: number, j: number) => Math.round(Math.abs(order[i].score - order[j].score) * 2) * n + (j - i);
+  const used = new Array<boolean>(n).fill(false);
+  const current: [number, number][] = [];
+  let best: { pairs: [number, number][]; cost: number; gap: number } | null = null;
+  let nodes = 0;
+
+  const search = (cost: number, gaps: number) => {
+    if (best && (cost > best.cost || (cost === best.cost && gaps >= best.gap))) return;
+    if (++nodes > SWISS_BUDGET && best) return;
+    const i = used.indexOf(false);
+    if (i === -1) {
+      best = { pairs: [...current], cost, gap: gaps };
+      return;
+    }
+    used[i] = true;
+    const options: number[] = [];
+    for (let j = i + 1; j < n; j++) if (!used[j]) options.push(j);
+    options.sort((x, y) => pairCost(i, x) - pairCost(i, y) || gap(i, x) - gap(i, y));
+    for (const j of options) {
+      used[j] = true;
+      current.push([i, j]);
+      search(cost + pairCost(i, j), gaps + gap(i, j));
+      current.pop();
+      used[j] = false;
+    }
+    used[i] = false;
+  };
+  search(0, 0);
+  const found = best as { pairs: [number, number][]; cost: number } | null;
+  return {
+    pairs: (found?.pairs ?? []).map(([i, j]): [PairingCandidate, PairingCandidate] => [order[i], order[j]]),
+    cost: found?.cost ?? 0,
+  };
 }
 
 /**
@@ -131,13 +176,18 @@ export function generatePairings(input: PairingInput): PairingOutput {
 
   let best: [PairingCandidate, PairingCandidate][] = [];
   let bestCost = Number.POSITIVE_INFINITY;
-  const attempts = Math.min(500, 60 + pool.length * 25);
-  for (let i = 0; i < attempts; i++) {
-    const { pairs, cost } = greedyPair(orderFor(mode, pool), previousPairs, soft);
-    if (cost < bestCost) {
-      best = pairs;
-      bestCost = cost;
-      if (cost === 0) break;
+  if (mode === "swiss") {
+    ({ pairs: best, cost: bestCost } = swissPair(pool, previousPairs, soft));
+  } else {
+    // Random: many shuffled greedy tries, keep the one with the fewest rematches.
+    const attempts = Math.min(500, 60 + pool.length * 25);
+    for (let i = 0; i < attempts; i++) {
+      const { pairs, cost } = greedyPair(shuffle(pool), previousPairs, soft);
+      if (cost < bestCost) {
+        best = pairs;
+        bestCost = cost;
+        if (cost === 0) break;
+      }
     }
   }
 

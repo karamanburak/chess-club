@@ -5,6 +5,7 @@
  *
  * Nothing here takes a snapshot; the actions do that via replaceDb() before saving.
  */
+import { pruneChallenges } from "./challenges";
 import type { Database, Season } from "./types";
 import { localDay } from "./time";
 
@@ -95,18 +96,23 @@ export function deleteAllFriendlies(db: Database): ResetSummary {
 }
 
 export function applyReset(db: Database, scope: ResetScope, today?: string): ResetSummary {
-  switch (scope) {
-    case "everything":
-      return resetEverything(db, today);
-    case "history":
-      return resetHistory(db, today);
-    case "tournaments":
-      return deleteAllTournaments(db);
-    case "sessions":
-      return deleteAllSessions(db);
-    case "friendlies":
-      return deleteAllFriendlies(db);
-  }
+  const summary = (() => {
+    switch (scope) {
+      case "everything":
+        return resetEverything(db, today);
+      case "history":
+        return resetHistory(db, today);
+      case "tournaments":
+        return deleteAllTournaments(db);
+      case "sessions":
+        return deleteAllSessions(db);
+      case "friendlies":
+        return deleteAllFriendlies(db);
+    }
+  })();
+  // Challenges of removed players, and played ones whose game went, go too; open ones between remaining players stay.
+  pruneChallenges(db);
+  return summary;
 }
 
 export const RESET_SCOPES: readonly ResetScope[] = ["everything", "history", "tournaments", "sessions", "friendlies"];

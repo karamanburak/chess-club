@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { PickablePlayer } from "@/lib/pick";
 import { fmt, plural } from "@/lib/i18n";
 import { FaceSvg } from "./Face";
@@ -14,6 +14,8 @@ const SHOW = 6;
  * only while the box is focused or has text. The chosen player becomes a chip and a hidden field named `name`
  * carries the id; while nobody is chosen the search box is `required`, so the browser stops an empty form.
  * Controlled (`value` + `onChange`) when two pickers must know about each other, uncontrolled otherwise.
+ * Keyboard: a WAI-ARIA combobox. Arrow keys move through the list, Enter takes the highlighted player (or the top
+ * match once something is typed), Escape closes the list.
  */
 export function PlayerPicker({
   name,
@@ -50,7 +52,20 @@ export function PlayerPicker({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("name");
   const [focused, setFocused] = useState(false);
-  const open = focused || query.trim() !== "";
+  const [closed, setClosed] = useState(false);
+  const [active, setActive] = useState(-1);
+  const open = !closed && (focused || query.trim() !== "");
+  const listId = useId();
+  const box = useRef<HTMLInputElement>(null);
+  // After "Change" the search box takes the focus back, so the keyboard user carries on where they were.
+  const [refocus, setRefocus] = useState(false);
+  useEffect(() => {
+    if (refocus && !selectedId) {
+      box.current?.focus();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRefocus(false);
+    }
+  }, [refocus, selectedId]);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -64,6 +79,7 @@ export function PlayerPicker({
     });
     return hits;
   }, [players, query, sort, exclude]);
+  const shown = matches.slice(0, SHOW);
 
   // Name on top, the numbers underneath in small mono: survives a narrow column without wrapping mid-phrase.
   const who = (p: PickablePlayer) => (
@@ -83,7 +99,14 @@ export function PlayerPicker({
         <input type="hidden" name={name} value={selected.id} />
         <FaceSvg seed={selected.avatar} title={selected.name} className="h-8 w-8 shrink-0 rounded-full ring-1 ring-line/70" />
         {who(selected)}
-        <button type="button" className="btn btn-sm btn-ghost ml-auto shrink-0 text-xs" onClick={() => setSelected(null)}>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost ml-auto shrink-0 text-xs"
+          onClick={() => {
+            setSelected(null);
+            setRefocus(true);
+          }}
+        >
           {c.pickChange}
         </button>
       </div>
@@ -95,17 +118,42 @@ export function PlayerPicker({
       <input type="hidden" name={name} value="" />
       <div className="flex gap-2">
         <input
+          ref={box}
           type="search"
           required
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={open && active >= 0 && shown[active] ? `${listId}-${active}` : undefined}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setClosed(false);
+            setActive(-1);
+          }}
           onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            setActive(-1);
+          }}
           onKeyDown={(e) => {
-            // Enter picks the top match instead of submitting a form that has no player yet.
-            if (e.key === "Enter") {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
-              if (matches[0]) setSelected(matches[0].id);
+              setClosed(false);
+              if (!shown.length) return;
+              const step = e.key === "ArrowDown" ? 1 : -1;
+              setActive((i) => (i + step + shown.length) % shown.length);
+            } else if (e.key === "Escape") {
+              if (open) e.preventDefault();
+              setClosed(true);
+              setActive(-1);
+            } else if (e.key === "Enter") {
+              // Enter picks instead of submitting a form that has no player yet: the highlighted one, else the top
+              // match of what was typed. With an empty box and nothing highlighted it does nothing.
+              e.preventDefault();
+              const pick = active >= 0 ? shown[active] : query.trim() ? shown[0] : undefined;
+              if (pick) setSelected(pick.id);
             }
           }}
           placeholder={placeholder ?? c.pickSearch}
@@ -119,7 +167,10 @@ export function PlayerPicker({
               key={s}
               type="button"
               onMouseDown={(e) => e.preventDefault()} // keep the search box focused, so the list stays open
-              onClick={() => setSort(s)}
+              onClick={() => {
+                setSort(s);
+                setActive(-1);
+              }}
               className={`px-2.5 py-1.5 transition-colors ${sort === s ? "bg-accent text-accent-fg" : "bg-panel-2 text-muted hover:text-fg"}`}
               aria-pressed={sort === s}
             >
@@ -130,22 +181,32 @@ export function PlayerPicker({
       </div>
       {open && (
         // A dropdown, not a block in the form: the form keeps its height until someone starts looking.
-        <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto flex flex-col divide-y divide-line/60 rounded-lg border border-line bg-panel shadow-xl fade-up">
-          {matches.length === 0 && <li className="px-3 py-2 text-xs text-muted">{c.pickNoMatch}</li>}
-          {matches.slice(0, SHOW).map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()} // select before the box blurs and the list closes
-                onClick={() => setSelected(p.id)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/10 transition-colors"
-              >
-                <FaceSvg seed={p.avatar} title={p.name} className="h-8 w-8 shrink-0 rounded-full ring-1 ring-line/70" />
-                {who(p)}
-              </button>
+        <ul id={listId} role="listbox" aria-label={placeholder ?? c.pickSearch} className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto flex flex-col divide-y divide-line/60 rounded-lg border border-line bg-panel shadow-xl fade-up">
+          {matches.length === 0 && (
+            <li role="presentation" className="px-3 py-2 text-xs text-muted">
+              {c.pickNoMatch}
+            </li>
+          )}
+          {shown.map((p, i) => (
+            <li
+              key={p.id}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === active}
+              onMouseDown={(e) => e.preventDefault()} // select before the box blurs and the list closes
+              onClick={() => setSelected(p.id)}
+              onMouseEnter={() => setActive(i)}
+              className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors ${i === active ? "bg-accent/10" : "hover:bg-accent/10"}`}
+            >
+              <FaceSvg seed={p.avatar} title={p.name} className="h-8 w-8 shrink-0 rounded-full ring-1 ring-line/70" />
+              {who(p)}
             </li>
           ))}
-          {matches.length > SHOW && <li className="px-3 py-1.5 text-xs text-muted">{fmt(c.pickMore, { n: matches.length - SHOW })}</li>}
+          {matches.length > SHOW && (
+            <li role="presentation" className="px-3 py-1.5 text-xs text-muted">
+              {fmt(c.pickMore, { n: matches.length - SHOW })}
+            </li>
+          )}
         </ul>
       )}
     </div>

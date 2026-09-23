@@ -64,6 +64,7 @@ export function migrate(raw: any): Database {
   for (const c of db.challenges) {
     c.whiteId ??= null;
     c.rated ??= true; // challenges before the rated/unrated choice all counted for Elo
+    if (c.session && c.timeControl) c.timeControl = ""; // sessions sent before they dropped the time control
   }
   // Every club lives in a season. The first one opens at the first game (or today) and is named after that year.
   if (db.seasons.length === 0) {
@@ -150,13 +151,19 @@ function todayName(): string {
   return `db-${localDay()}.json`;
 }
 
+/** The automatic one-per-day snapshots; everything else was taken on purpose (by hand, before a reset/import/restore). */
+const DAILY_RE = /^db-\d{4}-\d{2}-\d{2}\.json$/;
+
 function stampedName(label: string): string {
   return `db-${label}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
 }
 
 /* ---------------------------- JSON file ---------------------------- */
 
-/** Removes the oldest snapshots (daily and before-import/restore alike) so at most `keep` remain. */
+/**
+ * Removes the oldest snapshots so at most `keep` daily ones and `keep` deliberate ones remain. Counted apart, so a
+ * month of daily copies never pushes out the snapshot taken before a reset.
+ */
 export function pruneBackups(keep = KEEP_BACKUPS): string[] {
   if (!fs.existsSync(BACKUP_DIR)) return [];
   const files = fs
@@ -164,7 +171,8 @@ export function pruneBackups(keep = KEEP_BACKUPS): string[] {
     .filter((f) => /^db-[\w-]+\.json$/.test(f))
     .map((f) => ({ f, mtime: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
     .sort((a, b) => a.mtime - b.mtime);
-  const removed = files.slice(0, Math.max(0, files.length - keep)).map((x) => x.f);
+  const oldest = (list: typeof files) => list.slice(0, Math.max(0, list.length - keep)).map((x) => x.f);
+  const removed = [...oldest(files.filter((x) => DAILY_RE.test(x.f))), ...oldest(files.filter((x) => !DAILY_RE.test(x.f)))];
   for (const f of removed) fs.unlinkSync(path.join(BACKUP_DIR, f));
   return removed;
 }
@@ -220,6 +228,7 @@ const fileStorage: Storage = {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
     const name = stampedName(label);
     fs.copyFileSync(DB_PATH, path.join(BACKUP_DIR, name));
+    pruneBackups();
     return name;
   },
   async deleteBackup(file) {
@@ -247,10 +256,17 @@ async function sql(): Promise<Sql> {
       await q`CREATE TABLE IF NOT EXISTS club_state (id int PRIMARY KEY, version int NOT NULL DEFAULT 0, data jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`;
       await q`CREATE TABLE IF NOT EXISTS club_snapshots (name text PRIMARY KEY, data jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`;
     })();
+    // A failed setup (network blip on a cold start) must not stick for the life of the instance: try again next time.
+    schemaReady.catch(() => {
+      schemaReady = null;
+    });
   }
   await schemaReady;
   return sqlClient;
 }
+
+/** The day this instance last made sure the daily snapshot exists. */
+let dailyDoneFor = "";
 
 const postgresStorage: Storage = {
   async load() {
@@ -264,11 +280,18 @@ const postgresStorage: Storage = {
   async save(db, expectedVersion) {
     const q = await sql();
     const json = JSON.stringify(db);
+    // One snapshot per day of the state before the day's first change, copied server-side (as the file backend does).
+    // Once this instance has done it for today, the save is a single round trip.
+    const day = todayName();
+    if (dailyDoneFor !== day) {
+      const inserted = (await q`INSERT INTO club_snapshots (name, data) SELECT ${day}, data FROM club_state WHERE id = 1 ON CONFLICT (name) DO NOTHING RETURNING name`) as unknown[];
+      if (inserted.length) {
+        await q`DELETE FROM club_snapshots WHERE name ~ '^db-[0-9]{4}-[0-9]{2}-[0-9]{2}[.]json$' AND name NOT IN (SELECT name FROM club_snapshots WHERE name ~ '^db-[0-9]{4}-[0-9]{2}-[0-9]{2}[.]json$' ORDER BY created_at DESC LIMIT ${KEEP_BACKUPS})`;
+      }
+      dailyDoneFor = day;
+    }
     const updated = (await q`UPDATE club_state SET data = ${json}::jsonb, version = version + 1, updated_at = now() WHERE id = 1 AND version = ${expectedVersion} RETURNING version`) as unknown[];
-    if (!updated.length) return false;
-    await q`INSERT INTO club_snapshots (name, data) VALUES (${todayName()}, ${json}::jsonb) ON CONFLICT (name) DO NOTHING`;
-    await q`DELETE FROM club_snapshots WHERE name NOT IN (SELECT name FROM club_snapshots ORDER BY created_at DESC LIMIT ${KEEP_BACKUPS})`;
-    return true;
+    return updated.length > 0;
   },
   async listBackups() {
     const q = await sql();
@@ -284,6 +307,7 @@ const postgresStorage: Storage = {
     const q = await sql();
     const name = stampedName(label);
     const rows = (await q`INSERT INTO club_snapshots (name, data) SELECT ${name}, data FROM club_state WHERE id = 1 RETURNING name`) as unknown[];
+    await q`DELETE FROM club_snapshots WHERE name !~ '^db-[0-9]{4}-[0-9]{2}-[0-9]{2}[.]json$' AND name NOT IN (SELECT name FROM club_snapshots WHERE name !~ '^db-[0-9]{4}-[0-9]{2}-[0-9]{2}[.]json$' ORDER BY created_at DESC LIMIT ${KEEP_BACKUPS})`;
     return rows.length ? name : null;
   },
   async deleteBackup(file) {
@@ -309,31 +333,58 @@ export const readDb = cache(async (): Promise<Database> => (await storage.load()
 let chain: Promise<unknown> = Promise.resolve();
 
 /**
+ * The state objects that actually reached storage. mutate() reruns its callback on a version conflict with a fresh
+ * copy, so side effects queued by an attempt that lost (phone notifications) must check this before going out.
+ */
+const persisted = new WeakSet<Database>();
+
+export function wasPersisted(db: Database): boolean {
+  return persisted.has(db);
+}
+
+/**
  * Read, change, persist. Mutations in one process run strictly one after another;
  * across processes (several Vercel functions) the version check catches races and retries.
  */
 export function mutate<T>(fn: (db: Database) => T): Promise<T> {
-  const task = chain.then(async () => {
+  return queued(async () => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const { db, version } = await storage.load();
       const result = fn(db);
-      if (await storage.save(db, version)) return result;
+      if (await storage.save(db, version)) {
+        persisted.add(db);
+        return result;
+      }
     }
     throw new Error("Could not save: the club changed under us five times in a row. Try again.");
   });
+}
+
+/** Runs one write after the other in this process: mutate, replace and snapshots share the queue. */
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  const task = chain.then(work);
   chain = task.catch(() => undefined);
   return task;
 }
 
-/** Replaces the whole state (import, restore). Takes a labeled snapshot of the current one first. */
-export async function replaceDb(next: Database, label: string): Promise<void> {
-  await chain;
-  await storage.snapshot(label);
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const { version } = await storage.load();
-    if (await storage.save(next, version)) return;
-  }
-  throw new Error("Could not save the imported data.");
+/**
+ * Replaces the whole state (import, restore, reset). Takes a labeled snapshot of the current one first.
+ * Pass a function to build the new state from the current one inside the write queue (reset), so a change saved
+ * a moment earlier is not lost; the save is version-checked like mutate(), and a conflict builds it again.
+ */
+export function replaceDb(next: Database | ((current: Database) => Database), label: string): Promise<void> {
+  return queued(async () => {
+    await storage.snapshot(label);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { db, version } = await storage.load();
+      const value = typeof next === "function" ? next(db) : next;
+      if (await storage.save(value, version)) {
+        persisted.add(value);
+        return;
+      }
+    }
+    throw new Error("Could not save the imported data.");
+  });
 }
 
 export function listBackups(): Promise<BackupInfo[]> {
@@ -345,9 +396,8 @@ export function readBackup(file: string): Promise<Database | null> {
 }
 
 /** Saves the current state as a named snapshot without changing anything. Waits for pending writes first. */
-export async function takeSnapshot(label: string): Promise<string | null> {
-  await chain;
-  return storage.snapshot(label);
+export function takeSnapshot(label: string): Promise<string | null> {
+  return queued(() => storage.snapshot(label));
 }
 
 export function deleteBackup(file: string): Promise<boolean> {

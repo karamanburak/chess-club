@@ -15,7 +15,11 @@ export const ME_COOKIE = "cc_me";
 /** Set when a visitor chose "Just browsing" on the welcome screen; the screen stays away for a month. */
 export const SKIP_COOKIE = "cc_skip";
 export const SKIP_DAYS = 30;
-export const ADMIN_DAYS = 30;
+/**
+ * Admin sign-in lasts a club evening, not a month: the admin is usually a player too and signs in on whatever phone
+ * is at hand, so a forgotten admin session on someone else's device ends by itself.
+ */
+export const ADMIN_HOURS = 12;
 export const MEMBER_DAYS = 90;
 export const ME_DAYS = 365;
 
@@ -64,7 +68,9 @@ export function verifyToken(token: string | undefined, secret: string | undefine
 export function isAdminToken(token: string | undefined, secret: string | undefined, adminPasswordHash: string | undefined): boolean {
   if (!adminPasswordHash) return false;
   const t = verifyToken(token, secret);
-  return !!t && t.role === "admin" && t.bind === bindFor(adminPasswordHash);
+  // Tokens issued before the lifetime was shortened run further out than any new one can: not accepted either.
+  const tooLong = !!t && t.exp > Date.now() + ADMIN_HOURS * 3600_000 + 60_000;
+  return !!t && !tooLong && t.role === "admin" && t.bind === bindFor(adminPasswordHash);
 }
 
 /** True when the cookies grant access to the club: a valid member token for the current code, or an admin. */

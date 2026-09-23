@@ -9,8 +9,8 @@ import { avatarChoices } from "@/lib/avatar";
 import { AvatarPicker } from "@/components/AvatarPicker";
 import { achievements, attendance, nextTitle, titleFor } from "@/lib/club";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
-import { changeOwnPin, deletePlayer, resetPin, unclaimProfile, updatePlayer } from "@/lib/actions";
-import { challengeOpponents, openBetween, upcoming } from "@/lib/challenges";
+import { changeOwnPin, deletePlayer, resetPin, setNotifyTopic, unclaimProfile, updatePlayer } from "@/lib/actions";
+import { challengeOpponents, MAX_OPEN_PER_PAIR, openBetween, upcoming } from "@/lib/challenges";
 import { ChallengeCard } from "@/components/ChallengeCard";
 import { ChallengeForm } from "@/components/ChallengeForm";
 import { colorStats, formatDateTime, gamesForPlayer, playerMap, rankChanges, ratingHistory, recentForm, resultLabel, rivals, streaks } from "@/lib/queries";
@@ -61,7 +61,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
   const p = msg.players.profile;
   const member = admin || !!me;
   const theirUpcoming = upcoming(db, player.id);
-  const between = me && !isMe ? openBetween(db, me, player.id) : undefined;
+  const between = me && !isMe ? openBetween(db, me, player.id) : [];
 
   return (
     <>
@@ -232,15 +232,19 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                     ))}
                   </ul>
                 )}
-                {member && !between && player.active && (
+                {member && between.length < MAX_OPEN_PER_PAIR && player.active && (
                   <>
                     <p className="text-xs text-muted">{msg.challenges.onProfileHint}</p>
                     <ChallengeForm players={challengeOpponents(db)} me={me} admin={admin} toId={player.id} today={localDay()} />
                   </>
                 )}
-                {between && !theirUpcoming.some((c) => c.id === between.id) && (
+                {between.some((b) => !theirUpcoming.some((c) => c.id === b.id)) && (
                   <ul className="flex flex-col gap-3">
-                    <ChallengeCard c={between} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} games={gameById} />
+                    {between
+                      .filter((b) => !theirUpcoming.some((c) => c.id === b.id))
+                      .map((b) => (
+                        <ChallengeCard key={b.id} c={b} names={names} me={me} admin={admin} t={msg} lang={lang} clubName={db.settings.club.name} games={gameById} />
+                      ))}
                   </ul>
                 )}
                 {!member && <p className="text-xs text-muted">{msg.challenges.guest}</p>}
@@ -313,16 +317,16 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                 <p className="text-xs text-muted -mt-1">{p.pinHint}</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="label">{p.current}</label>
-                    <input name="current" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required={!!player.pinHash} className="w-full font-mono text-center tracking-widest" autoComplete="off" />
+                    <label htmlFor="f-current" className="label">{p.current}</label>
+                    <input id="f-current" name="current" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required={!!player.pinHash} className="w-full font-mono text-center tracking-widest" autoComplete="off" />
                   </div>
                   <div>
-                    <label className="label">{p.new}</label>
-                    <input name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
+                    <label htmlFor="f-new" className="label">{p.new}</label>
+                    <input id="f-new" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
                   </div>
                   <div>
-                    <label className="label">{p.repeat}</label>
-                    <input name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
+                    <label htmlFor="f-repeat" className="label">{p.repeat}</label>
+                    <input id="f-repeat" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
                   </div>
                 </div>
                 <SubmitButton className="btn" pendingText={msg.common.saving}>
@@ -338,21 +342,52 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
             </Section>
           )}
 
+          {isMe && !db.settings.memberNotifyOff && (
+            <Section
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <Icon name="bell" className="h-4 w-4 text-accent" /> {msg.challenges.phoneTitle}
+                </span>
+              }
+              right={player.notifyTopic ? <span className="badge border-win/40 text-win">{msg.challenges.phoneOn}</span> : undefined}
+            >
+              <form action={setNotifyTopic} className="flex flex-col gap-3">
+                <input type="hidden" name="playerId" value={player.id} />
+                <p className="text-xs text-muted -mt-1">{msg.challenges.phoneHint}</p>
+                <div className="flex gap-2">
+                  <input
+                    name="topic"
+                    defaultValue={player.notifyTopic ?? ""}
+                    pattern="[A-Za-z0-9_\-]{8,64}"
+                    placeholder="chess-club-me-7f3k9q2m"
+                    aria-label={msg.challenges.phoneTopic}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="flex-1 min-w-0 font-mono"
+                  />
+                  <SubmitButton className="btn" pendingText={msg.common.saving}>
+                    {msg.challenges.phoneSave}
+                  </SubmitButton>
+                </div>
+              </form>
+            </Section>
+          )}
+
           {admin && (
             <>
               <Section title={p.editPlayer}>
                 <form action={updatePlayer.bind(null, player.id)} className="flex flex-col gap-3">
                   <div>
-                    <label className="label">{p.name}</label>
-                    <input name="name" defaultValue={player.name} required className="w-full" />
+                    <label htmlFor="f-name" className="label">{p.name}</label>
+                    <input id="f-name" name="name" defaultValue={player.name} required className="w-full" />
                   </div>
                   <div>
-                    <label className="label">{p.note}</label>
-                    <input name="note" defaultValue={player.note ?? ""} className="w-full" placeholder={p.notePlaceholder} />
+                    <label htmlFor="f-note" className="label">{p.note}</label>
+                    <input id="f-note" name="note" defaultValue={player.note ?? ""} className="w-full" placeholder={p.notePlaceholder} />
                   </div>
                   <div>
-                    <label className="label">{p.startingElo}</label>
-                    <input name="initialRating" type="number" defaultValue={player.initialRating} min={100} max={3000} className="w-full" />
+                    <label htmlFor="f-startingElo" className="label">{p.startingElo}</label>
+                    <input id="f-startingElo" name="initialRating" type="number" defaultValue={player.initialRating} min={100} max={3000} className="w-full" />
                     <p className="text-xs text-muted mt-1.5">{p.startingEloHint}</p>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
@@ -370,8 +405,8 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                   </p>
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
-                      <label className="label">{p.newPinOptional}</label>
-                      <input name="pin" type="text" inputMode="numeric" pattern="\d{4}" maxLength={4} className="w-full font-mono tracking-widest" autoComplete="off" placeholder={p.pinPlaceholder} />
+                      <label htmlFor="f-newPinOptional" className="label">{p.newPinOptional}</label>
+                      <input id="f-newPinOptional" name="pin" type="text" inputMode="numeric" pattern="\d{4}" maxLength={4} className="w-full font-mono tracking-widest" autoComplete="off" placeholder={p.pinPlaceholder} />
                     </div>
                     <SubmitButton className="btn" pendingText={msg.common.saving}>
                       {player.pinHash ? p.resetPin : p.setPin}

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Color tokens. Dark is the default; light overrides via data-theme or system preference. */
+/* Color tokens. Dark is the default; light overrides via data-theme (PrefsMenu, stored per device). */
 :root {
   --bg: #0e1014;
   --panel: #151820;
@@ -26,12 +26,13 @@
   --line: #dedbd1;
   --fg: #1d1f24;
   --muted: #6b7183;
-  --accent: #c98a15;
+  /* Dark enough for white button text and small accent text on the light page (WCAG AA, 4.5:1). */
+  --accent: #96660b;
   --accent-fg: #ffffff;
   --win: #15803d;
   --loss: #dc2626;
   --draw: #64748b;
-  --glow: rgba(201, 138, 21, 0.1);
+  --glow: rgba(150, 102, 11, 0.1);
   color-scheme: light;
 }
 
@@ -97,7 +98,8 @@ body {
   input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
   select,
   textarea {
-    @apply bg-panel-2 border border-line rounded-lg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20;
+    /* 16px on phones: iOS Safari zooms into any field with smaller text. */
+    @apply bg-panel-2 border border-line rounded-lg px-3 py-2 text-base sm:text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20;
   }
   input[type="checkbox"],
   input[type="radio"] {
@@ -164,7 +166,7 @@ body {
   }
 
   .chip {
-    @apply flex items-center gap-2 text-sm rounded-lg border border-line bg-panel-2 px-3 py-2 cursor-pointer select-none transition-colors hover:border-muted/60 has-checked:border-accent/60 has-checked:bg-accent/10 has-disabled:opacity-60 has-disabled:cursor-default;
+    @apply flex items-center gap-2 text-sm rounded-lg border border-line bg-panel-2 px-3 py-2 cursor-pointer select-none transition-colors hover:border-muted/60 has-checked:border-accent/60 has-checked:bg-accent/10 has-disabled:opacity-60 has-disabled:cursor-default has-focus-visible:ring-2 has-focus-visible:ring-accent/40;
   }
 
   .stat {

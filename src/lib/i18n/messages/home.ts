@@ -1,7 +1,6 @@
 // Home page. Keep values plain strings; placeholders are {name}. `de` must mirror `en` exactly.
 const en = {
   nextNight: "Next club night {when}",
-  seasonLeader: "{season} leader:",
   startNight: "Start club night",
   backToNight: "Back to club night",
   newTournament: "New tournament",
@@ -33,7 +32,6 @@ const en = {
 };
 const de: typeof en = {
   nextNight: "Nächster Vereinsabend {when}",
-  seasonLeader: "Spitze {season}:",
   startNight: "Vereinsabend starten",
   backToNight: "Zurück zum Vereinsabend",
   newTournament: "Neues Turnier",

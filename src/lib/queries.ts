@@ -3,7 +3,7 @@ import { clubTimeZone, localMonth } from "./time";
 import { fmt, localeOf, type Dict, type Lang } from "./i18n";
 import { tournaments as tournamentMessages } from "./i18n/messages/tournaments";
 import { EMPTY_COLOR, pairKey, type ColorStats } from "./pairing";
-import { countsForRating, isForfeit, performanceRating, PROVISIONAL_GAMES, recomputeRatings, scoreFor } from "./elo";
+import { countsForRating, isForfeit, performanceRating, recomputeRatings, scoreFor } from "./elo";
 
 /* ------------------------------------------------------------------ */
 /* Basics                                                              */
@@ -17,10 +17,6 @@ export function leaderboard(db: Database, includeInactive = false): Player[] {
   return db.players
     .filter((p) => includeInactive || p.active)
     .sort((a, b) => b.rating - a.rating || b.gamesPlayed - a.gamesPlayed || a.name.localeCompare(b.name));
-}
-
-export function isProvisional(p: Player): boolean {
-  return p.gamesPlayed < PROVISIONAL_GAMES;
 }
 
 /** Completed games, newest first. */
@@ -625,11 +621,14 @@ export function monthsWithGames(db: Database): string[] {
   return [...set].sort().reverse();
 }
 
-/** Per-player results within a calendar month (YYYY-MM). */
+/**
+ * Per-player results within a calendar month (YYYY-MM) of the club's time zone. Counts what the season table counts:
+ * games played over the board (no forfeits), so the month champion and the season agree.
+ */
 export function monthTable(db: Database, month: string): MonthRow[] {
   const rows = new Map<string, MonthRow>();
-  for (const g of completedGames(db)) {
-    if (!g.completedAt?.startsWith(month)) continue;
+  for (const g of db.games) {
+    if (!countsForRating(g) || localMonth(new Date(g.completedAt)) !== month) continue;
     for (const id of [g.whiteId, g.blackId]) {
       let r = rows.get(id);
       if (!r) {
@@ -660,12 +659,6 @@ export function resultLabel(result: GameResult | null): string {
   if (result === "+/-") return "+ / –";
   if (result === "-/+") return "– / +";
   return result.replace("-", "–");
-}
-
-export function scoreLabel(score: number | null | undefined): string {
-  if (score === null || score === undefined) return "–";
-  if (score === 0.5) return "½";
-  return String(score);
 }
 
 /** Dates are shown in club time (see time.ts), not in the server's zone: Vercel runs in UTC. */

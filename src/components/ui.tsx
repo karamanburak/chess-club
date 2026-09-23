@@ -8,7 +8,6 @@ import { formatDate } from "@/lib/queries";
 import { FaceSvg } from "./Face";
 import { Icon, type IconName } from "./icons";
 import type { Achievement, Title } from "@/lib/club";
-import type { GameResult } from "@/lib/types";
 
 /** Player id → avatar seed, read once per request. Server components only. */
 const avatarLookup = cache(async () => new Map((await readDb()).players.map((p) => [p.id, p.avatar])));
@@ -130,11 +129,6 @@ export function Rank({ n }: { n: number }) {
   return <span className="text-muted font-mono text-sm">{n}</span>;
 }
 
-export function ResultChip({ result }: { result: GameResult | null }) {
-  const label = !result ? "–" : result === "1/2-1/2" ? "½–½" : result.replace("-", "–");
-  return <span className="font-mono text-sm px-2 py-0.5 rounded-md bg-panel-2 border border-line">{label}</span>;
-}
-
 export function Section({ title, right, children, flush }: { title: ReactNode; right?: ReactNode; children: ReactNode; flush?: boolean }) {
   return (
     <section className={`card flex flex-col ${flush ? "p-0 overflow-hidden" : ""}`}>
@@ -177,7 +171,8 @@ export async function StreakBadge({ streak }: { streak: { kind: "W" | "D" | "L";
   const { t } = await getT();
   return (
     <span className="badge border-win/40 text-win bg-win/10" title={fmt(t.common.streakWins, { n: streak.length })}>
-      🔥{streak.length}W
+      <Icon name="flame" className="h-3 w-3" aria-hidden />
+      {streak.length}W
     </span>
   );
 }

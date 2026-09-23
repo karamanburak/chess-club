@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { createChallenge, type ChallengeFormState } from "@/lib/actions";
-import type { ChallengeOpponent } from "@/lib/challenges";
+import { SESSION_MINUTES, type ChallengeOpponent } from "@/lib/challenges";
 import { Icon } from "./icons";
 import { NowButton } from "./NowButton";
 import { OpponentPicker } from "./OpponentPicker";
@@ -25,6 +25,9 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
   // The admin picks who challenges; that player must not turn up as their own opponent.
   const [fromId, setFromId] = useState(v.fromId ?? players.find((p) => p.id !== toId)?.id ?? "");
   const others = players.filter((p) => p.id !== me && (!admin || me || p.id !== fromId));
+  // One game or a session; the session's length and scoring only show once it is picked.
+  const [kind, setKind] = useState(v.kind === "session" ? "session" : "game");
+  const [scoring, setScoring] = useState(v.scoring === "single" ? "single" : "each");
 
   useEffect(() => {
     if (state.error) toast.push({ text: state.error, tone: "error" });
@@ -37,8 +40,8 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
     <form key={state.ok ?? state.error ?? "fresh"} action={action} className="flex flex-col gap-3 text-sm">
       {admin && !me && (
         <div>
-          <label className="label">{t.common.player}</label>
-          <select name="fromId" required className="w-full" value={fromId} onChange={(e) => setFromId(e.target.value)}>
+          <label htmlFor="f-common-player" className="label">{t.common.player}</label>
+          <select id="f-common-player" name="fromId" required className="w-full" value={fromId} onChange={(e) => setFromId(e.target.value)}>
             {players.filter((p) => p.id !== toId).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -66,13 +69,60 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
         </div>
       </div>
       <div>
-        <label className="label">{m.place}</label>
-        <input name="place" required maxLength={80} defaultValue={v.place ?? ""} placeholder={m.placePlaceholder} className="w-full" />
+        <label htmlFor="f-place" className="label">{m.place}</label>
+        <input id="f-place" name="place" required maxLength={80} defaultValue={v.place ?? ""} placeholder={m.placePlaceholder} className="w-full" />
       </div>
       <div>
-        <label className="label">{m.timeControl}</label>
-        <TimeControlField defaultValue={v.timeControl ?? ""} />
+        <span className="label">{m.kindLabel}</span>
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={m.kindLabel}>
+          {[
+            ["game", m.kindGame],
+            ["session", m.kindSession],
+          ].map(([val, l]) => (
+            <label key={val} className="chip justify-center text-xs">
+              <input type="radio" name="kind" value={val} checked={kind === val} onChange={() => setKind(val)} className="sr-only" />
+              {l}
+            </label>
+          ))}
+        </div>
       </div>
+      {/* A session mixes speeds (a few blitz games, then a rapid one), so only a single game names its time control. */}
+      {kind === "game" && (
+        <div>
+          <label className="label">{m.timeControl}</label>
+          <TimeControlField defaultValue={v.timeControl ?? ""} />
+        </div>
+      )}
+      {kind === "session" && (
+        <div className="flex flex-col gap-3 rounded-xl border border-line bg-panel-2/40 p-3">
+          <div>
+            <span className="label">{m.sessionLength}</span>
+            <div className="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label={m.sessionLength}>
+              {SESSION_MINUTES.map((n) => (
+                <label key={n} className="chip justify-center px-1 text-xs">
+                  <input type="radio" name="minutes" value={n} defaultChecked={(v.minutes ?? "30") === String(n)} className="sr-only" />
+                  {m.durations[String(n) as keyof typeof m.durations]}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <span className="label">{m.sessionScoring}</span>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={m.sessionScoring}>
+              {[
+                ["each", m.scoringEach],
+                ["single", m.scoringSingle],
+              ].map(([val, l]) => (
+                <label key={val} className="chip justify-center text-center text-xs">
+                  <input type="radio" name="scoring" value={val} checked={scoring === val} onChange={() => setScoring(val)} className="sr-only" />
+                  {l}
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-muted">{scoring === "each" ? m.scoringEachHint : m.scoringSingleHint}</p>
+          </div>
+        </div>
+      )}
       <div>
         <label className="label">{m.ratedLabel}</label>
         <div className="grid grid-cols-2 gap-2">
@@ -88,8 +138,8 @@ export function ChallengeForm({ players, me, admin, toId, today }: { players: Ch
         </div>
       </div>
       <div>
-        <label className="label">{m.note}</label>
-        <input name="note" maxLength={200} defaultValue={v.note ?? ""} placeholder={m.notePlaceholder} className="w-full" />
+        <label htmlFor="f-challenge-note" className="label">{m.note}</label>
+        <input id="f-challenge-note" name="note" maxLength={200} defaultValue={v.note ?? ""} placeholder={m.notePlaceholder} className="w-full" />
       </div>
       <SubmitButton className="btn btn-primary self-start" pendingText={m.sending}>
         <Icon name="swords" className="h-4 w-4" /> {m.send}

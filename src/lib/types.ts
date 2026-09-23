@@ -1,3 +1,5 @@
+import type { Lockout } from "./lockout";
+
 /** "+/-" = white wins by forfeit, "-/+" = black wins by forfeit. Forfeits count for standings, not for Elo. */
 export type GameResult = "1-0" | "0-1" | "1/2-1/2" | "+/-" | "-/+";
 
@@ -20,8 +22,12 @@ export interface Player {
   avatar: string;
   /** Four-digit PIN (scrypt hash) that lets the player claim their identity on a device. Unset until first claim or admin reset. */
   pinHash?: string;
+  /** The player's own ntfy topic: challenge news for them is pushed there. Never sent to other devices. */
+  notifyTopic?: string;
   pinFails?: number;
   pinLockedUntil?: string | null;
+  /** PIN locks since the last right PIN; each doubles the next (lockout.ts). */
+  pinLocks?: number;
 }
 
 export interface Game {
@@ -153,11 +159,15 @@ export interface Settings {
   ownerPasswordHash?: string;
   /** Club-wide member code (scrypt hash). Unset = no code asked, open club. */
   memberCodeHash?: string;
+  /** Switches on Admin (unset = on): "I am new, join the club", the admin's phone feed, members' own challenge pushes. */
+  selfSignupOff?: boolean;
+  clubNotifyOff?: boolean;
+  memberNotifyOff?: boolean;
   sessionSecret?: string;
   /** Brute-force brakes for the admin password and the member code (see src/lib/lockout.ts). */
-  adminLock?: { fails?: number; lockedUntil?: string | null };
-  memberLock?: { fails?: number; lockedUntil?: string | null };
-  ownerLock?: { fails?: number; lockedUntil?: string | null };
+  adminLock?: Lockout;
+  memberLock?: Lockout;
+  ownerLock?: Lockout;
 }
 
 export type ChallengeStatus = "pending" | "accepted" | "declined" | "played" | "cancelled" | "expired";
@@ -166,6 +176,16 @@ export type ChallengeStatus = "pending" | "accepted" | "declined" | "played" | "
  * A game two members agreed to play: one proposes a date, the other accepts, declines or proposes
  * another time. Once played, the result becomes a friendly game (`gameId`).
  */
+/**
+ * A challenge for a block of time instead of one game ("two hours of 3+2"). The sender picks the length and how it
+ * is scored: `each` enters every game on its own (each one a rated friendly, colours alternating), `single` counts
+ * the whole session as one game, recorded like a normal challenge.
+ */
+export interface ChallengeSession {
+  minutes: number;
+  scoring: "each" | "single";
+}
+
 export interface Challenge {
   id: string;
   /** Who issued the challenge. */
@@ -184,6 +204,10 @@ export interface Challenge {
   /** Agreed when the challenge is sent: does the game move Elo? Copied onto the recorded game. */
   rated: boolean;
   gameId: string | null;
+  /** Set for a session; absent or null for a single game. */
+  session?: ChallengeSession | null;
+  /** The games of an `each` session, in the order they were played. */
+  gameIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

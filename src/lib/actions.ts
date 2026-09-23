@@ -1,16 +1,19 @@
 "use server";
+import { localPath } from "./safe-path";
+import { keepInstallation } from "./export";
 
 import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot } from "./db";
+import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot, wasPersisted } from "./db";
 import { mergeCheck, mergePlayers as mergeRecords, type MergeProblem } from "./merge";
-import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireChallenges, involves, TIME_CONTROL_RE, type ChallengeProblem } from "./challenges";
+import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireChallenges, gameBySession, involves, nextSessionColors, openBetween, parseSession, PAST_GRACE_MS, pruneChallenges, recordable, sessionScore, TIME_CONTROL_RE, type ChallengeProblem } from "./challenges";
 import { RESULTS, recomputeRatings } from "./elo";
 import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
+  formatDateTime,
   activeParticipants,
   activeSession,
   colorStats,
@@ -24,27 +27,36 @@ import {
   standings,
   TIEBREAK_PRESETS,
 } from "./queries";
-import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, hashPassword, isAdmin, requireAdmin, rotateSessionSecret, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
-import { timingSafeEqual } from "node:crypto";
+import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, hashPassword, isAdmin, isMember, requireAdmin, rotateSessionSecret, secureCookies, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { UserError } from "./errors";
 import { makeGame } from "./games";
 import { generateKnockoutRound, syncKnockout } from "./knockout";
 import { isAvatar, randomAvatar } from "./avatar";
-import { clearFails, isLocked, LOCK_MAX_FAILS, LOCK_MINUTES, registerFail } from "./lockout";
-import { clearPinFails, PIN_RE, pinLocked, registerPinFail } from "./pin";
+import { failAttempt, isLocked, LOCK_MAX_FAILS, reserveAttempt } from "./lockout";
+import { clearPinFails, PIN_RE, pinLocked, registerPinFail, reservePinAttempt } from "./pin";
 import { applyReset, isResetScope, type ResetScope } from "./reset";
 import { SKIP_COOKIE, SKIP_DAYS } from "./tokens";
-import { fmt, isLang, LANG_COOKIE, type Dict, type Lang } from "./i18n";
+import { dicts, fmt, isLang, LANG_COOKIE, pickLang, type Dict, type Lang } from "./i18n";
 import { getT } from "./lang";
-import { ntfyTopic, sendNotifications, type Notification } from "./notify";
+import { ntfyTopic, PLAYER_TOPIC_RE, sendNotifications, type Notification } from "./notify";
 import { requestOrigin } from "./request-url";
 import { dayOf, localDay, localStamp, zonedToUtc } from "./time";
 import { currentSeason, seasonTable } from "./club";
-import type { Database, Game, GameResult, PairingMode, TiebreakKey, Tournament } from "./types";
+import type { Challenge, Database, Game, GameResult, PairingMode, TiebreakKey, Tournament } from "./types";
+
+/** Longest text any form field may store; the club lives in one JSON document, so nothing may inflate it. */
+const FIELD_MAX = 1000;
+/** Names of players, tournaments, seasons and the club. */
+const NAME_MAX = 80;
 
 function str(fd: FormData, key: string): string {
   const v = fd.get(key);
-  return typeof v === "string" ? v.trim() : "";
+  return typeof v === "string" ? v.trim().slice(0, FIELD_MAX) : "";
+}
+
+function nameField(fd: FormData): string {
+  return str(fd, "name").slice(0, NAME_MAX).trim();
 }
 
 function num(fd: FormData, key: string, fallback: number): number {
@@ -53,6 +65,10 @@ function num(fd: FormData, key: string, fallback: number): number {
 }
 
 type Msgs = Dict["errors"];
+
+const TOURNAMENT_STATUSES: readonly Tournament["status"][] = ["planned", "running", "finished"];
+/** A Swiss event longer than this is a typo, not a plan. */
+const MAX_ROUNDS = 30;
 
 /** The user-facing messages in this request's language. Fetch it before mutate(): its callback is synchronous. */
 async function msgs(): Promise<Msgs> {
@@ -72,19 +88,24 @@ function revalidateAll() {
 /* Action plumbing: user-facing errors, activity log                   */
 /* ------------------------------------------------------------------ */
 
+/** A phone notification queued inside mutate(), with the state it was written into (sent only if that one was saved). */
+type PendingNote = Notification & { from: Database };
+
 interface Actor {
   admin: boolean;
   owner?: boolean;
   /** Address the request came in on, for the "tap to open" link of phone notifications. */
   origin: string;
   /** Activity lines written during this action, sent to the phone once the action is through. */
-  notes: Notification[];
+  notes: PendingNote[];
+  /** The claimed player acting, so personal notifications skip the person who caused them. */
+  me: string | null;
 }
 
 const actor = new AsyncLocalStorage<Actor>();
 
 async function beginActor(): Promise<Actor> {
-  return { admin: await isAdmin(), origin: ntfyTopic() ? await requestOrigin() : "", notes: [] };
+  return { admin: await isAdmin(), origin: await requestOrigin(), notes: [], me: await currentPlayerId() };
 }
 
 /** A redirect() is a thrown signal, not a failure: the action's writes went through. */
@@ -94,12 +115,17 @@ function isRedirect(e: unknown): boolean {
 
 /**
  * Pushes this action's activity lines to the phone after the response is out. mutate() reruns its callback on a
- * version conflict, so the same line can be queued twice: send each text once.
+ * version conflict: lines from an attempt that lost were never saved and are dropped, and a line queued twice
+ * is sent once.
  */
 function notifyPhone(a: Actor): void {
-  if (a.notes.length === 0 || !ntfyTopic()) return;
+  const club = !!ntfyTopic();
   const seen = new Set<string>();
-  const items = a.notes.filter((n) => !seen.has(n.text) && seen.add(n.text));
+  const items = a.notes
+    .filter((n) => wasPersisted(n.from))
+    .filter((n) => (n.topic || club) && !seen.has(`${n.topic ?? ""}|${n.text}`) && seen.add(`${n.topic ?? ""}|${n.text}`))
+    .map((n): Notification => ({ text: n.text, title: n.title, admin: n.admin, url: n.url, ...(n.topic ? { topic: n.topic } : {}) }));
+  if (items.length === 0) return;
   after(() => sendNotifications(items));
 }
 
@@ -110,7 +136,7 @@ function flashUrl(referer: string | null, message: string): string {
   if (referer) {
     try {
       const u = new URL(referer);
-      pathname = u.pathname;
+      pathname = localPath(u.pathname);
       search = u.searchParams;
     } catch {
       /* keep defaults */
@@ -121,12 +147,21 @@ function flashUrl(referer: string | null, message: string): string {
 }
 
 /**
+ * The member code guards actions too, not only pages: proxy.ts lets /join and /admin through, and a server action
+ * can be posted to any page. Only the ways in (join, admin sign-in and recovery, language) are OPEN.
+ */
+type Gate = "club" | "open";
+const CLUB: Gate = "club";
+const OPEN_GATE: Gate = "open";
+
+/**
  * Runs a form action. A UserError does not crash to the error boundary (whose
  * message Next.js hides in production) but sends the user back to the page
  * they were on with the message shown as a toast.
  */
-async function run(fn: () => void | Promise<void>): Promise<void> {
+async function run(fn: () => void | Promise<void>, gate: Gate = CLUB): Promise<void> {
   const h = await headers();
+  if (gate === CLUB && !(await isMember())) redirect("/join");
   const a = await beginActor();
   try {
     await actor.run(a, fn);
@@ -139,7 +174,8 @@ async function run(fn: () => void | Promise<void>): Promise<void> {
 }
 
 /** Like run(), for actions called directly from client components: the error is returned instead of redirecting. */
-async function attempt(fn: () => void | Promise<void>): Promise<{ error?: string }> {
+async function attempt(fn: () => void | Promise<void>, gate: Gate = CLUB): Promise<{ error?: string }> {
+  if (gate === CLUB && !(await isMember())) return { error: (await msgs()).joinFirst };
   const a = await beginActor();
   try {
     await actor.run(a, fn);
@@ -163,7 +199,33 @@ function log(db: Database, text: string): void {
   const line = who?.owner ? `${text} [owner]` : text;
   db.activity.push({ id: newId(), at: new Date().toISOString(), admin: who?.admin ?? false, text: line });
   if (db.activity.length > LOG_KEEP) db.activity.splice(0, db.activity.length - LOG_KEEP);
-  who?.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: who.origin ? `${who.origin}/admin#activity` : "" });
+  if (!db.settings.clubNotifyOff) who?.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: who.origin ? `${who.origin}/admin#activity` : "", from: db });
+}
+
+/** The notify messages in the club's language: the recipient is not the one making the request. */
+function notifyMsgs(db: Database): Dict["challenges"]["notify"] {
+  return dicts[pickLang(db.settings.language)].challenges.notify;
+}
+
+/**
+ * Pushes a line about challenge `c` to the players in it who set up their own topic, except whoever caused it.
+ * Queued like log() lines and sent after the action went through.
+ */
+function actorName(db: Database): string {
+  const who = actor.getStore();
+  return who?.me ? nameOf(db, who.me) : notifyMsgs(db).admin;
+}
+
+function tellPlayers(db: Database, c: Challenge, text: (m: Dict["challenges"]["notify"], when: string) => string): void {
+  const who = actor.getStore();
+  if (!who || db.settings.memberNotifyOff) return;
+  const lang = pickLang(db.settings.language);
+  const line = text(notifyMsgs(db), formatDateTime(c.at, lang));
+  for (const id of [c.fromId, c.toId]) {
+    if (id === who.me) continue;
+    const topic = db.players.find((p) => p.id === id)?.notifyTopic;
+    if (topic) who.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: `${who.origin}/challenges`, topic, from: db });
+  }
 }
 
 /** Who is acting: the admin may edit any game, a claimed device only its own boards. */
@@ -191,20 +253,36 @@ async function requireOwner(source: FormData | string | undefined): Promise<void
   const hash = settings.ownerPasswordHash;
   if (!hash) return;
   const E = await msgs();
-  if (isLocked(settings.ownerLock)) throw new UserError(E.ownerLocked);
   const pw = typeof source === "string" ? source.trim() : source instanceof FormData ? str(source, "owner") : "";
   if (!pw) throw new UserError(E.ownerRequired);
-  if (!verifyPassword(pw, hash)) {
-    const locked = await mutate((db) => {
-      registerFail((db.settings.ownerLock ??= {}));
-      if (isLocked(db.settings.ownerLock)) log(db, `Owner password locked for ${LOCK_MINUTES} minutes after ${LOCK_MAX_FAILS} wrong tries`);
-      return isLocked(db.settings.ownerLock);
-    });
-    throw new UserError(locked ? E.ownerLocked : E.ownerWrong);
-  }
-  if (settings.ownerLock) await mutate((db) => delete db.settings.ownerLock);
+  if (!(await reserveTry("ownerLock"))) throw new UserError(E.ownerLocked);
+  if (!verifyPassword(pw, hash)) throw new UserError((await failTry("ownerLock", "Owner password")) ? E.ownerLocked : E.ownerWrong);
+  await clearTries("ownerLock");
   const store = actor.getStore();
   if (store) store.owner = true;
+}
+
+type LockKey = "adminLock" | "memberLock" | "ownerLock";
+
+/** Claims one try at a club secret before it is checked (see lockout.ts); false while it is locked. */
+async function reserveTry(key: LockKey): Promise<boolean> {
+  return mutate((db) => reserveAttempt((db.settings[key] ??= {})));
+}
+
+/** The claimed try was wrong: locks once the window's tries are used up, logs that, and says whether it is locked now. */
+async function failTry(key: LockKey, what: string): Promise<boolean> {
+  return mutate((db) => {
+    const l = (db.settings[key] ??= {});
+    const minutes = failAttempt(l);
+    if (minutes) log(db, `${what} locked for ${minutes} minutes after ${LOCK_MAX_FAILS} wrong tries`);
+    return isLocked(l);
+  });
+}
+
+async function clearTries(key: LockKey): Promise<void> {
+  await mutate((db) => {
+    delete db.settings[key];
+  });
 }
 
 function mayEditGame(who: { admin: boolean; me: string | null }, g: Pick<Game, "whiteId" | "blackId">): boolean {
@@ -244,8 +322,8 @@ export async function setLanguage(lang: Lang) {
   return attempt(async () => {
     if (!isLang(lang)) throw new UserError((await msgs()).unknownLanguage);
     const jar = await cookies();
-    jar.set(LANG_COOKIE, lang, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax" });
-  });
+    jar.set(LANG_COOKIE, lang, { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax", secure: await secureCookies() });
+  }, OPEN_GATE);
 }
 
 /* ------------------------------------------------------------------ */
@@ -265,30 +343,24 @@ export async function setupAdmin(fd: FormData) {
     await setSessionCookie();
     revalidateAll();
     redirect("/admin");
-  });
+  }, OPEN_GATE);
 }
 
 export async function login(fd: FormData) {
   return run(async () => {
     const { settings } = await readDb();
-    if (isLocked(settings.adminLock)) redirect("/admin?error=locked");
+    if (!(await reserveTry("adminLock"))) redirect("/admin?error=locked");
     if (!settings.adminPasswordHash || !verifyPassword(str(fd, "password"), settings.adminPasswordHash)) {
-      const locked = await mutate((db) => {
-        registerFail((db.settings.adminLock ??= {}));
-        if (isLocked(db.settings.adminLock)) log(db, `Admin sign-in locked for ${LOCK_MINUTES} minutes after ${LOCK_MAX_FAILS} wrong passwords`);
-        return isLocked(db.settings.adminLock);
-      });
-      redirect(locked ? "/admin?error=locked" : "/admin?error=wrong");
+      redirect((await failTry("adminLock", "Admin sign-in")) ? "/admin?error=locked" : "/admin?error=wrong");
     }
     await setSessionCookie();
     await mutate((db) => {
-      clearFails(db.settings.adminLock);
       delete db.settings.adminLock;
       log(db, "Admin signed in");
     });
     revalidateAll();
-    redirect(str(fd, "next") || "/admin");
-  });
+    redirect(localPath(str(fd, "next"), "/admin"));
+  }, OPEN_GATE);
 }
 
 export async function logout() {
@@ -296,7 +368,7 @@ export async function logout() {
     await clearSessionCookie();
     revalidateAll();
     redirect("/");
-  });
+  }, OPEN_GATE);
 }
 
 export async function changePassword(fd: FormData) {
@@ -340,6 +412,40 @@ export async function setOwnerPassword(fd: FormData) {
   });
 }
 
+/** Turns the owner password off: the destructive tools fall back to the admin password alone. Needs the owner password once more. */
+export async function clearOwnerPassword(owner?: string) {
+  return run(async () => {
+    await requireOwner(owner);
+    await mutate((db) => {
+      delete db.settings.ownerPasswordHash;
+      delete db.settings.ownerLock;
+      log(db, "Owner password turned off: the admin password alone opens every tool again");
+    });
+    revalidateAll();
+    redirect("/admin?ok=owneroff");
+  });
+}
+
+const SWITCHES = { selfSignup: "selfSignupOff", clubNotify: "clubNotifyOff", memberNotify: "memberNotifyOff" } as const;
+export type SwitchKey = keyof typeof SWITCHES;
+const SWITCH_LOG: Record<SwitchKey, string> = { selfSignup: "Self sign-up", clubNotify: "Admin phone notifications", memberNotify: "Members' phone notifications" };
+
+/** Flips one of the plain on/off switches on Admin. */
+export async function setSwitch(key: SwitchKey, on: boolean) {
+  return run(async () => {
+    await requireAdmin();
+    if (!(key in SWITCHES)) throw new Error(`unknown switch ${key}`);
+    await mutate((db) => {
+      const flag = SWITCHES[key];
+      if (on) delete db.settings[flag];
+      else db.settings[flag] = true;
+      log(db, `${SWITCH_LOG[key]} turned ${on ? "on" : "off"}`);
+    });
+    revalidateAll();
+    redirect("/admin?ok=switched");
+  });
+}
+
 /**
  * Forgotten admin or owner password. Only available when the server has ADMIN_RESET_TOKEN in its environment
  * (Vercel → Settings → Environment Variables, or .env.local). The token is compared in constant time;
@@ -348,10 +454,11 @@ export async function setOwnerPassword(fd: FormData) {
 export async function resetAdminPassword(fd: FormData) {
   return run(async () => {
     const expected = process.env.ADMIN_RESET_TOKEN?.trim();
-    if (!expected) redirect("/admin?error=noreset");
-    const given = Buffer.from(str(fd, "token"));
-    const want = Buffer.from(expected);
-    if (given.length !== want.length || !timingSafeEqual(given, want)) redirect("/admin?error=badtoken");
+    // A short token is guessable: recovery stays off until the env value has at least 32 characters.
+    if (!expected || expected.length < 32) redirect("/admin?error=noreset");
+    // Compare digests, so neither the time taken nor an early length mismatch tells anything about the token.
+    const digest = (v: string) => createHash("sha256").update(v).digest();
+    if (!timingSafeEqual(digest(str(fd, "token")), digest(expected))) redirect("/admin?error=badtoken");
     const which = str(fd, "which") === "owner" ? "owner" : "admin";
     const pw = str(fd, "password");
     if (pw.length < (which === "owner" ? 6 : 4)) redirect(which === "owner" ? "/admin?error=ownershort" : "/admin?error=short");
@@ -370,7 +477,7 @@ export async function resetAdminPassword(fd: FormData) {
     if (which === "admin") await setSessionCookie();
     revalidateAll();
     redirect(which === "owner" ? "/admin?ok=recoveredowner" : "/admin?ok=recovered");
-  });
+  }, OPEN_GATE);
 }
 
 /** Rotates the signing secret: every admin, member and "this is me" cookie on every device stops working, this one included. */
@@ -416,11 +523,8 @@ export async function importDatabase(fd: FormData) {
     const obj = parsed as Record<string, unknown>;
     if (!obj || !Array.isArray(obj.players) || !Array.isArray(obj.games)) redirect("/admin?error=badjson");
     const current = await readDb();
-    const next = migrate(obj);
     // Keep the credentials of this installation.
-    next.settings.adminPasswordHash = current.settings.adminPasswordHash;
-    next.settings.ownerPasswordHash = current.settings.ownerPasswordHash;
-    next.settings.sessionSecret = current.settings.sessionSecret;
+    const next = keepInstallation(migrate(obj), current);
     recomputeRatings(next);
     log(next, `Database imported from "${file.name}" (${next.players.length} players, ${next.games.length} games)`);
     await replaceDb(next, "before-import");
@@ -460,10 +564,7 @@ export async function restoreBackup(file: string, owner?: string) {
     if (!BACKUP_NAME_RE.test(file)) throw new UserError(E.invalidBackupName);
     const next = await readBackup(file);
     if (!next) throw new UserError(E.backupNotFound);
-    const current = await readDb();
-    next.settings.adminPasswordHash = current.settings.adminPasswordHash;
-    next.settings.ownerPasswordHash = current.settings.ownerPasswordHash;
-    next.settings.sessionSecret = current.settings.sessionSecret;
+    keepInstallation(next, await readDb());
     recomputeRatings(next);
     log(next, `Snapshot ${file} restored`);
     await replaceDb(next, "before-restore");
@@ -523,11 +624,13 @@ export async function resetData(scope: ResetScope, owner?: string) {
   return run(async () => {
     await requireOwner(owner);
     if (!isResetScope(scope)) throw new UserError((await msgs()).unknownResetScope);
-    const next = structuredClone(await readDb());
-    const removed = applyReset(next, scope);
-    recomputeRatings(next);
-    log(next, `${RESET_LOG[scope]} (${removed.players} players, ${removed.games} games, ${removed.tournaments} tournaments, ${removed.sessions} club nights)`);
-    await replaceDb(next, `before-reset-${scope}`);
+    // Built from the state inside the write queue, not this request's cached read: nothing saved meanwhile is lost.
+    await replaceDb((next) => {
+      const removed = applyReset(next, scope);
+      recomputeRatings(next);
+      log(next, `${RESET_LOG[scope]} (${removed.players} players, ${removed.games} games, ${removed.tournaments} tournaments, ${removed.sessions} club nights)`);
+      return next;
+    }, `before-reset-${scope}`);
     revalidateAll();
     redirect(`/admin?ok=reset-${scope}`);
   });
@@ -539,7 +642,7 @@ export async function updateClub(fd: FormData) {
     const E = await msgs();
     await mutate((db) => {
       const c = db.settings.club;
-      c.name = str(fd, "name") || c.name;
+      c.name = nameField(fd) || c.name;
       c.meets = str(fd, "meets");
       const next = str(fd, "nextNight");
       if (next && !/^\d{4}-\d{2}-\d{2}$/.test(next)) throw new UserError(E.nextNightNeedsDate);
@@ -590,23 +693,16 @@ export async function joinClub(fd: FormData) {
   return run(async () => {
     const db = await readDb();
     const hash = db.settings.memberCodeHash;
-    const next = str(fd, "next").startsWith("/") ? str(fd, "next") : "/";
+    const next = localPath(str(fd, "next"));
     if (!hash) redirect(next);
     const back = (error: string) => `/join?error=${error}&next=${encodeURIComponent(next)}`;
-    if (isLocked(db.settings.memberLock)) redirect(back("locked"));
-    if (!verifyPassword(str(fd, "code"), hash)) {
-      const locked = await mutate((d) => {
-        registerFail((d.settings.memberLock ??= {}));
-        if (isLocked(d.settings.memberLock)) log(d, `Member code locked for ${LOCK_MINUTES} minutes after ${LOCK_MAX_FAILS} wrong codes`);
-        return isLocked(d.settings.memberLock);
-      });
-      redirect(back(locked ? "locked" : "wrong"));
-    }
-    if (db.settings.memberLock) await mutate((d) => delete d.settings.memberLock);
+    if (!(await reserveTry("memberLock"))) redirect(back("locked"));
+    if (!verifyPassword(str(fd, "code"), hash)) redirect(back((await failTry("memberLock", "Member code")) ? "locked" : "wrong"));
+    await clearTries("memberLock");
     await setMemberCookie(hash);
     revalidateAll();
     redirect(next);
-  });
+  }, OPEN_GATE);
 }
 
 /* ------------------------------------------------------------------ */
@@ -623,7 +719,7 @@ export async function startSeason(fd: FormData) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) throw new UserError(E.seasonNeedsStart);
       const lastEnd = db.seasons.map((s) => s.end ?? "").sort().at(-1) ?? "";
       if (lastEnd && start <= lastEnd) throw new UserError(fmt(E.seasonMustStartAfter, { date: lastEnd }));
-      const name = str(fd, "name") || fmt(E.defaultSeasonName, { year: start.slice(0, 4) });
+      const name = nameField(fd) || fmt(E.defaultSeasonName, { year: start.slice(0, 4) });
       db.seasons.push({ id: newId(), name, start, end: null, championId: null });
       log(db, `${name} started (${start})`);
     });
@@ -676,7 +772,7 @@ export async function renameSeason(id: string, fd: FormData) {
     await mutate((db) => {
       const s = db.seasons.find((x) => x.id === id);
       if (!s) return;
-      const name = str(fd, "name");
+      const name = nameField(fd);
       if (!name) throw new UserError(E.seasonNeedsName);
       log(db, `Season "${s.name}" renamed to "${name}"`);
       s.name = name;
@@ -693,7 +789,7 @@ export async function renameSeason(id: string, fd: FormData) {
 export async function addPlayer(fd: FormData) {
   return run(async () => {
     await requireAdmin();
-    const name = str(fd, "name");
+    const name = nameField(fd);
     if (!name) return;
     const E = await msgs();
     await mutate((db) => {
@@ -722,7 +818,7 @@ export async function addPlayer(fd: FormData) {
 export async function updatePlayer(id: string, fd: FormData) {
   return run(async () => {
     await requireAdmin();
-    const name = str(fd, "name");
+    const name = nameField(fd);
     await mutate((db) => {
       const p = db.players.find((x) => x.id === id);
       if (!p) return;
@@ -765,13 +861,15 @@ export async function setAvatar(id: string, seed: string) {
 export async function registerSelf(fd: FormData) {
   return run(async () => {
     const E = await msgs();
+    if ((await readDb()).settings.selfSignupOff) throw new UserError(E.signupClosed);
     if (await currentPlayerId()) throw new UserError(E.deviceAlreadyClaimed);
-    const name = str(fd, "name");
+    const name = nameField(fd);
     if (name.length < 2) throw new UserError(E.enterName);
     const pin = str(fd, "pin");
     if (!PIN_RE.test(pin)) throw new UserError(E.pinFormat);
     if (pin !== str(fd, "confirm")) throw new UserError(E.pinMismatch);
     const id = newId();
+    const pinHash = hashPassword(pin);
     await mutate((db) => {
       if (db.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
         throw new UserError(fmt(E.nameAlreadyListed, { name }));
@@ -789,12 +887,12 @@ export async function registerSelf(fd: FormData) {
         active: true,
         createdAt: new Date().toISOString(),
         avatar: randomAvatar(),
-        pinHash: hashPassword(pin),
+        pinHash,
       });
       log(db, `${name} joined the club (start Elo ${rating})`);
       recomputeRatings(db);
     });
-    await setMeCookie(id);
+    await setMeCookie(id, pinHash);
     revalidateAll();
     redirect(noticeUrl(`/players/${id}`, fmt(E.welcomeNew, { name })));
   });
@@ -812,36 +910,46 @@ export async function claimWithPin(fd: FormData) {
   return run(async () => {
     const id = str(fd, "playerId");
     const pin = str(fd, "pin");
-    const next = str(fd, "next").startsWith("/") ? str(fd, "next") : "";
+    const next = localPath(str(fd, "next"), "");
     const back = (error: string): never => redirect(`/me?player=${encodeURIComponent(id)}&error=${error}${next ? `&next=${encodeURIComponent(next)}` : ""}`);
     const E = await msgs();
     const db = await readDb();
     const p = db.players.find((x) => x.id === id);
     if (!p) throw new UserError(E.playerNotFound);
     if (!PIN_RE.test(pin)) back("short");
-    if (!p.pinHash) {
+    let pinHash = p.pinHash;
+    if (!pinHash) {
       if (pin !== str(fd, "confirm")) back("mismatch");
+      const fresh = hashPassword(pin);
+      pinHash = fresh;
       await mutate((d) => {
         const q = d.players.find((x) => x.id === id)!;
         if (q.pinHash) throw new UserError(E.pinJustSet);
-        q.pinHash = hashPassword(pin);
+        q.pinHash = fresh;
         log(d, `${q.name} set their PIN and claimed their profile`);
       });
     } else {
-      if (pinLocked(p)) back("locked");
-      if (!verifyPassword(pin, p.pinHash)) {
-        await mutate((d) => {
+      // The try is counted before the PIN is checked, so parallel guesses cannot all pass one read of an open lock.
+      const reserved = await mutate((d) => {
+        const q = d.players.find((x) => x.id === id);
+        return !!q && reservePinAttempt(q);
+      });
+      if (!reserved) back("locked");
+      if (!verifyPassword(pin, pinHash)) {
+        const locked = await mutate((d) => {
           const q = d.players.find((x) => x.id === id);
-          if (q) {
-            registerPinFail(q);
-            if (q.pinLockedUntil) log(d, `Too many wrong PINs for ${q.name}; locked for a while`);
-          }
+          const minutes = q ? registerPinFail(q) : 0;
+          if (q && minutes) log(d, `Too many wrong PINs for ${q.name}; locked for ${minutes} minutes`);
+          return !!q && pinLocked(q);
         });
-        back("wrong");
+        back(locked ? "locked" : "wrong");
       }
-      if (p.pinFails || p.pinLockedUntil) await mutate((d) => clearPinFails(d.players.find((x) => x.id === id)!));
+      await mutate((d) => {
+        const q = d.players.find((x) => x.id === id);
+        if (q) clearPinFails(q);
+      });
     }
-    await setMeCookie(id);
+    await setMeCookie(id, pinHash);
     revalidateAll();
     redirect(noticeUrl(next || `/players/${id}`, fmt(E.welcomeBack, { name: p.name })));
   });
@@ -850,9 +958,9 @@ export async function claimWithPin(fd: FormData) {
 /** "Just browsing": no identity on this device for a while; results can still be entered. */
 export async function skipIdentity(fd: FormData) {
   return run(async () => {
-    const next = str(fd, "next").startsWith("/") ? str(fd, "next") : "/";
+    const next = localPath(str(fd, "next"));
     const jar = await cookies();
-    jar.set(SKIP_COOKIE, "1", { httpOnly: true, sameSite: "lax", path: "/", maxAge: SKIP_DAYS * 86400 });
+    jar.set(SKIP_COOKIE, "1", { httpOnly: true, sameSite: "lax", secure: await secureCookies(), path: "/", maxAge: SKIP_DAYS * 86400 });
     redirect(next);
   });
 }
@@ -871,14 +979,40 @@ export async function changeOwnPin(fd: FormData) {
     const p = db.players.find((x) => x.id === id);
     if (!p) throw new UserError(E.playerNotFound);
     if (p.pinHash && !verifyPassword(current, p.pinHash)) throw new UserError(E.currentPinWrong);
+    const pinHash = hashPassword(pin);
     await mutate((d) => {
       const q = d.players.find((x) => x.id === id)!;
-      q.pinHash = hashPassword(pin);
+      q.pinHash = pinHash;
       clearPinFails(q);
       log(d, `${q.name} changed their PIN`);
     });
+    // The new PIN signs the player's other devices out; this one stays in.
+    await setMeCookie(id, pinHash);
     revalidateAll();
     redirect(noticeUrl(`/players/${id}`, E.pinChanged));
+  });
+}
+
+/** A player sets (or clears) their own ntfy topic for challenge news. Self only: it is their phone. */
+export async function setNotifyTopic(fd: FormData) {
+  return run(async () => {
+    const id = str(fd, "playerId");
+    const E = await msgs();
+    if ((await currentPlayerId()) !== id) throw new UserError(E.notifyNotYours);
+    const topic = str(fd, "topic");
+    if (topic && !PLAYER_TOPIC_RE.test(topic)) throw new UserError(E.notifyTopicFormat);
+    await mutate((d) => {
+      const p = d.players.find((x) => x.id === id);
+      if (!p) throw new UserError(E.playerNotFound);
+      if (topic) p.notifyTopic = topic;
+      else delete p.notifyTopic;
+      // The topic itself stays out of the log: it is the only secret of the subscription.
+      log(d, topic ? `${p.name} turned on phone notifications` : `${p.name} turned off phone notifications`);
+      const who = actor.getStore();
+      if (topic && who) who.notes.push({ text: fmt(notifyMsgs(d).test, { name: p.name }), title: d.settings.club.name, admin: false, url: `${who.origin}/challenges`, topic, from: d });
+    });
+    revalidateAll();
+    redirect(noticeUrl(`/players/${id}`, topic ? E.notifyOn : E.notifyOff));
   });
 }
 
@@ -932,8 +1066,21 @@ export async function deletePlayer(id: string) {
           if (r.byePlayerId === id) r.byePlayerId = null;
         }
       }
+      for (const s of db.seasons) if (s.championId === id) s.championId = null;
       log(db, `Player ${nameOf(db, id)} deleted together with ${removedGames.size} games`);
       db.players = db.players.filter((p) => p.id !== id);
+      pruneChallenges(db);
+      // Bracket slots of the deleted player empty out; syncKnockout re-derives winners from what is left.
+      for (const t of db.tournaments) {
+        if (!t.knockout) continue;
+        for (const m of t.knockout.matches) {
+          m.gameIds = m.gameIds.filter((g) => !removedGames.has(g));
+          if (m.a === id) m.a = null;
+          if (m.b === id) m.b = null;
+          if (m.winnerId === id) m.winnerId = null;
+        }
+        syncKnockout(db, t);
+      }
       recomputeRatings(db);
     });
     revalidateAll();
@@ -951,6 +1098,7 @@ const CHALLENGE_ERRORS: Record<ChallengeProblem, keyof Msgs> = {
   inactive: "challengeInactive",
   past: "challengePast",
   exists: "challengeExists",
+  tooMany: "challengeTooMany",
 };
 
 /** The acting player for challenge actions: the claimed device, or for the admin the `as` field / the challenger. */
@@ -967,7 +1115,7 @@ export interface ChallengeFormState {
   ok?: number;
 }
 
-const CHALLENGE_FIELDS = ["fromId", "toId", "date", "time", "place", "timeControl", "rated", "note"] as const;
+const CHALLENGE_FIELDS = ["fromId", "toId", "date", "time", "place", "timeControl", "rated", "note", "kind", "minutes", "scoring"] as const;
 
 /** useActionState action: on a user error the typed values come back so the form does not reset. */
 export async function createChallenge(_prev: ChallengeFormState, fd: FormData): Promise<ChallengeFormState> {
@@ -979,9 +1127,13 @@ export async function createChallenge(_prev: ChallengeFormState, fd: FormData): 
     if (!fromId) throw new UserError(E.membersOnly);
     const at = combineDateTime(str(fd, "date"), str(fd, "time"));
     if (!at) throw new UserError(E.challengePast);
+    const session = parseSession(str(fd, "kind"), str(fd, "minutes"), str(fd, "scoring"));
+    if (session === "invalid") throw new UserError(E.sessionDetails);
     // Where and how fast are part of the deal, not decoration: the form marks them required, the server insists.
-    if (!str(fd, "place") || !str(fd, "timeControl")) throw new UserError(E.challengeDetails);
-    if (!TIME_CONTROL_RE.test(str(fd, "timeControl"))) throw new UserError(E.timeControlFormat);
+    // A session has no single time control (its games may be played at different speeds), so it needs a place only.
+    const timeControl = session ? "" : str(fd, "timeControl");
+    if (!str(fd, "place") || (!session && !timeControl)) throw new UserError(E.challengeDetails);
+    if (!session && !TIME_CONTROL_RE.test(timeControl)) throw new UserError(E.timeControlFormat);
     await mutate((db) => {
       expireChallenges(db);
       const problem = challengeCheck(db, fromId, toId, at);
@@ -993,17 +1145,20 @@ export async function createChallenge(_prev: ChallengeFormState, fd: FormData): 
         toId,
         at,
         place: str(fd, "place").slice(0, 80),
-        timeControl: str(fd, "timeControl").slice(0, 20),
+        timeControl: timeControl.slice(0, 20),
         note: str(fd, "note").slice(0, 200),
         status: "pending",
         proposedBy: fromId,
         whiteId: null,
         rated: str(fd, "rated") !== "off",
         gameId: null,
+        ...(session ? { session, gameIds: [] } : {}),
         createdAt: now,
         updatedAt: now,
       });
-      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${localStamp(at)}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
+      const what = session ? ` (session ${session.minutes} min, ${session.scoring === "each" ? "every game counts" : "one game"})` : "";
+      log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${localStamp(at)}${what}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
+      tellPlayers(db, db.challenges[db.challenges.length - 1], (m, when) => fmt(m.challenged, { name: nameOf(db, fromId), when }));
     });
     revalidateAll();
   });
@@ -1033,6 +1188,7 @@ export async function answerChallenge(id: string, answer: "accept" | "decline") 
       c.whiteId = c.status === "accepted" ? drawColors(c).whiteId : null;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} ${c.status}${c.whiteId ? `, ${nameOf(db, c.whiteId)} has white` : ""}`);
+      tellPlayers(db, c, (m, when) => fmt(c.status === "accepted" ? m.accepted : m.declined, { name: actorName(db), when }));
     });
     revalidateAll();
   });
@@ -1044,12 +1200,16 @@ export async function proposeChallengeTime(id: string, fd: FormData) {
     const E = await msgs();
     const who = await challengeActor();
     const at = combineDateTime(str(fd, "date"), str(fd, "time"));
-    if (!at || new Date(at).getTime() < Date.now()) throw new UserError(E.challengePast);
+    // Same rules as a new challenge: "right now" still passes, the minute of another open game of the pair does not.
+    if (!at || new Date(at).getTime() < Date.now() - PAST_GRACE_MS) throw new UserError(E.challengePast);
+    const minute = (iso: string) => Math.floor(new Date(iso).getTime() / 60_000);
     await mutate((db) => {
       expireChallenges(db);
       const c = findChallenge(db, id, E);
       if (!["pending", "accepted"].includes(effectiveStatus(c))) throw new UserError(E.challengeNotOpen);
       if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      if (openBetween(db, c.fromId, c.toId).some((o) => o.id !== c.id && minute(o.at) === minute(at))) throw new UserError(E.challengeExists);
+      if (c.gameIds?.length) throw new UserError(E.sessionHasGames);
       c.at = at;
       if (str(fd, "place") || fd.has("place")) c.place = str(fd, "place").slice(0, 80);
       if (fd.has("timeControl")) c.timeControl = str(fd, "timeControl").slice(0, 20);
@@ -1058,6 +1218,7 @@ export async function proposeChallengeTime(id: string, fd: FormData) {
       c.proposedBy = who.me && involves(c, who.me) ? who.me : c.fromId;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}: new time ${localStamp(at)} proposed by ${nameOf(db, c.proposedBy)}`);
+      tellPlayers(db, c, (m, when) => fmt(m.newTime, { name: actorName(db), when }));
     });
     revalidateAll();
   });
@@ -1072,9 +1233,11 @@ export async function cancelChallenge(id: string) {
       const c = findChallenge(db, id, E);
       if (!["pending", "accepted"].includes(effectiveStatus(c))) throw new UserError(E.challengeNotOpen);
       if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      if (c.gameIds?.length) throw new UserError(E.sessionHasGames);
       c.status = "cancelled";
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} withdrawn`);
+      tellPlayers(db, c, (m, when) => fmt(m.withdrawn, { name: actorName(db), when }));
     });
     revalidateAll();
   });
@@ -1089,10 +1252,10 @@ export async function recordChallengeResult(id: string, fd: FormData) {
     await mutate((db) => {
       expireChallenges(db);
       const c = findChallenge(db, id, E);
-      const status = effectiveStatus(c);
-      // A challenge may be recorded once agreed; an accepted one that slipped past its day still counts if both agree it was played.
-      if (status !== "accepted" && !(c.status === "accepted" && status === "expired")) throw new UserError(E.challengeNotAccepted);
+      // A challenge may be recorded once agreed; one that slipped past its day still counts if both agree it was played.
+      if (!recordable(c)) throw new UserError(E.challengeNotAccepted);
       if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      if (gameBySession(c)) throw new UserError(E.sessionUseAddGame);
       // Colours were drawn at acceptance; older records without one get the draw now.
       c.whiteId ??= drawColors(c).whiteId;
       const whiteId = c.whiteId;
@@ -1109,10 +1272,72 @@ export async function recordChallengeResult(id: string, fd: FormData) {
       c.gameId = g.id;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge played: ${nameOf(db, whiteId)} – ${nameOf(db, blackId)} ${resultLabel(result)}`);
+      tellPlayers(db, c, (m) => fmt(m.result, { name: actorName(db), game: `${nameOf(db, whiteId)} ${resultLabel(result)} ${nameOf(db, blackId)}` }));
       recomputeRatings(db);
     });
     revalidateAll();
   });
+}
+
+/**
+ * One game of an `each` session: a rated (or not, as agreed) friendly on its own, colours alternating from the draw.
+ * The session stays open for the next game until someone finishes it.
+ */
+export async function addSessionGame(id: string, fd: FormData) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor();
+    const result = parseResult(str(fd, "result"), E);
+    await mutate((db) => {
+      expireChallenges(db);
+      const c = findChallenge(db, id, E);
+      if (!gameBySession(c) || !recordable(c)) throw new UserError(E.challengeNotAccepted);
+      if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      c.whiteId ??= drawColors(c).whiteId;
+      const { whiteId, blackId } = nextSessionColors(c);
+      const g = makeGame(db, { whiteId, blackId, rated: c.rated, tournamentId: null, round: null, board: null, sessionId: null });
+      g.result = result;
+      // Live: now. Entered afterwards: within the booked block, so the games keep their order and their day.
+      const start = new Date(c.at).getTime();
+      const when = new Date(Math.max(start, Math.min(Date.now(), start + (c.session?.minutes ?? 0) * 60_000))).toISOString();
+      g.createdAt = when;
+      g.completedAt = when;
+      db.games.push(g);
+      c.gameIds = [...(c.gameIds ?? []), g.id];
+      c.updatedAt = new Date().toISOString();
+      log(db, `Session ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}, game ${c.gameIds.length}: ${nameOf(db, whiteId)} – ${nameOf(db, blackId)} ${resultLabel(result)}`);
+      recomputeRatings(db);
+    });
+    revalidateAll();
+  });
+}
+
+/** Closes an `each` session once its games are in; the card then shows the final score. */
+export async function finishSession(id: string) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await challengeActor();
+    await mutate((db) => {
+      expireChallenges(db);
+      const c = findChallenge(db, id, E);
+      if (!gameBySession(c) || !recordable(c)) throw new UserError(E.challengeNotAccepted);
+      if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
+      if (!c.gameIds?.length) throw new UserError(E.sessionNoGames);
+      c.status = "played";
+      c.updatedAt = new Date().toISOString();
+      const score = sessionScore(c, new Map(db.games.map((g) => [g.id, g])));
+      const line = `${nameOf(db, c.fromId)} ${scoreText(score.from)}–${scoreText(score.to)} ${nameOf(db, c.toId)}`;
+      log(db, `Session finished: ${line} (${score.games} games)`);
+      tellPlayers(db, c, (m) => fmt(m.sessionResult, { name: actorName(db), score: line }));
+    });
+    revalidateAll();
+  });
+}
+
+/** 3.5 → "3½" for score lines. */
+function scoreText(n: number): string {
+  const whole = Math.floor(n);
+  return n - whole === 0.5 ? (whole ? `${whole}½` : "½") : String(n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1207,6 +1432,15 @@ export async function deleteGame(gameId: string) {
         c.gameId = null;
         c.updatedAt = new Date().toISOString();
       }
+      // A session loses just this game; one that was finished and now has none left is open again.
+      for (const c of db.challenges.filter((x) => x.gameIds?.includes(gameId))) {
+        c.gameIds = c.gameIds!.filter((x) => x !== gameId);
+        if (c.status === "played" && c.gameIds.length === 0) {
+          c.status = "accepted";
+          reopened.push(c);
+        }
+        c.updatedAt = new Date().toISOString();
+      }
       log(db, `${whereOf(db, g)}: game ${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)} deleted${reopened.length ? ", challenge reopened" : ""}`);
       db.games = db.games.filter((x) => x.id !== gameId);
       for (const s of db.sessions) for (const r of s.rounds) r.pairings = r.pairings.filter((p) => p.gameId !== gameId);
@@ -1223,19 +1457,20 @@ export async function deleteGame(gameId: string) {
 export async function createTournament(fd: FormData) {
   return run(async () => {
     await requireMember();
-    const name = str(fd, "name");
+    const name = nameField(fd);
     if (!name) return;
     const mode = parseMode(str(fd, "pairingMode"));
     const id = newId();
     await mutate((db) => {
-      const participantIds = fd.getAll("participantIds").map(String);
+      const known = new Set(db.players.map((p) => p.id));
+      const participantIds = [...new Set(fd.getAll("participantIds").map(String))].filter((pid) => known.has(pid));
       const t: Tournament = {
         id,
         name,
         date: str(fd, "date") || localDay(),
         status: "planned",
         pairingMode: mode,
-        plannedRounds: Math.max(1, Math.round(num(fd, "plannedRounds", 5))),
+        plannedRounds: Math.min(MAX_ROUNDS, Math.max(1, Math.round(num(fd, "plannedRounds", 5)))),
         rated: fd.get("rated") !== "off",
         timeControl: str(fd, "timeControl"),
         tiebreaks: tiebreaksFrom(fd, mode === "roundrobin" ? TIEBREAK_PRESETS.find((p) => p.key === "rr")!.order : db.settings.defaultTiebreaks),
@@ -1269,13 +1504,13 @@ export async function updateTournament(id: string, fd: FormData) {
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
-      const name = str(fd, "name");
+      const name = nameField(fd);
       if (name) t.name = name;
       if (str(fd, "date")) t.date = str(fd, "date");
       t.timeControl = str(fd, "timeControl");
       t.tiebreaks = tiebreaksFrom(fd, t.tiebreaks);
       if (t.pairingMode !== "roundrobin" && t.pairingMode !== "knockout") {
-        t.plannedRounds = Math.max(Math.max(1, t.rounds.length), Math.round(num(fd, "plannedRounds", t.plannedRounds)));
+        t.plannedRounds = Math.max(Math.max(1, t.rounds.length), Math.min(MAX_ROUNDS, Math.round(num(fd, "plannedRounds", t.plannedRounds))));
       }
       if (t.status === "planned") {
         t.pairingMode = parseMode(str(fd, "pairingMode"));
@@ -1336,7 +1571,7 @@ export async function toggleWithdraw(id: string, playerId: string) {
     await requireMember();
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
-      if (!t) return;
+      if (!t || !t.participantIds.includes(playerId)) return;
       if (t.withdrawnIds.includes(playerId)) {
         t.withdrawnIds = t.withdrawnIds.filter((p) => p !== playerId);
         log(db, `Tournament "${t.name}": ${nameOf(db, playerId)} rejoined`);
@@ -1344,6 +1579,8 @@ export async function toggleWithdraw(id: string, playerId: string) {
         t.withdrawnIds.push(playerId);
         log(db, `Tournament "${t.name}": ${nameOf(db, playerId)} withdrew`);
       }
+      // In a bracket the withdrawal decides the running match (see syncKnockout).
+      if (t.knockout) syncKnockout(db, t);
     });
     revalidateAll();
   });
@@ -1448,6 +1685,7 @@ export async function updateRoundPairings(id: string, roundNumber: number, fd: F
       const seen = new Set<string>();
       const use = (pid: string) => {
         if (!pid) return;
+        if (!t.participantIds.includes(pid)) throw new UserError(E.playerNotFound);
         if (seen.has(pid)) throw new UserError(E.playerOnTwoBoards);
         seen.add(pid);
       };
@@ -1503,6 +1741,7 @@ export async function deleteLastRound(id: string) {
 export async function setTournamentStatus(id: string, status: Tournament["status"]) {
   return run(async () => {
     await requireMember();
+    if (!TOURNAMENT_STATUSES.includes(status)) return;
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t) return;
@@ -1625,7 +1864,7 @@ export async function sessionAddPlayer(id: string, fd: FormData) {
     if (!playerId) return;
     await mutate((db) => {
       const s = db.sessions.find((x) => x.id === id);
-      if (!s || s.presentIds.includes(playerId)) return;
+      if (!s || s.presentIds.includes(playerId) || !db.players.some((p) => p.id === playerId)) return;
       s.presentIds.push(playerId);
       log(db, `Club night: ${nameOf(db, playerId)} arrived`);
       const last = s.rounds[s.rounds.length - 1];

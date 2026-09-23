@@ -20,8 +20,8 @@ export async function RecordPastGame({ players }: { players: Player[] }) {
       <p className="text-xs text-muted -mt-1">{m.hint}</p>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="label">⚪ {t.common.white}</label>
-          <select name="whiteId" required className="w-full">
+          <label htmlFor="f-common-white" className="label">⚪ {t.common.white}</label>
+          <select id="f-common-white" name="whiteId" required className="w-full">
             {active.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.rating})
@@ -30,8 +30,8 @@ export async function RecordPastGame({ players }: { players: Player[] }) {
           </select>
         </div>
         <div>
-          <label className="label">⚫ {t.common.black}</label>
-          <select name="blackId" required className="w-full" defaultValue={active[1]?.id}>
+          <label htmlFor="f-common-black" className="label">⚫ {t.common.black}</label>
+          <select id="f-common-black" name="blackId" required className="w-full" defaultValue={active[1]?.id}>
             {active.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.rating})

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { localPath } from "@/lib/safe-path";
 import { readDb } from "@/lib/db";
 import { isMember } from "@/lib/auth";
 import { getT } from "@/lib/lang";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 /** The front door: one shared member code, asked once per device. */
 export default async function JoinPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
-  const next = typeof sp.next === "string" && sp.next.startsWith("/") ? sp.next : "/";
+  const next = localPath(sp.next);
   if (await isMember()) redirect(next);
   const { t } = await getT();
   const club = (await readDb()).settings.club;

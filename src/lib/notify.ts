@@ -15,7 +15,12 @@ export interface Notification {
   admin: boolean;
   /** Address to open when the notification is tapped, or "" for none. */
   url: string;
+  /** A player's own topic; absent means the club's admin topic (NTFY_TOPIC). */
+  topic?: string;
 }
+
+/** What a player may type as their topic: ntfy's own alphabet, long enough not to be guessed by accident. */
+export const PLAYER_TOPIC_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 export const DEFAULT_NTFY_URL = "https://ntfy.sh";
 
@@ -52,7 +57,7 @@ export interface NtfyMessage {
 /** Builds the HTTP request for one notification. Pure, so it can be tested without a network. */
 export function ntfyRequest(n: Notification, env: NtfyEnv = process.env): { url: string; init: RequestInit } {
   const body: NtfyMessage = {
-    topic: ntfyTopic(env) ?? "",
+    topic: n.topic ?? ntfyTopic(env) ?? "",
     message: n.text,
     title: n.title,
     tags: [n.admin ? "admin" : "member"],
@@ -69,8 +74,9 @@ export function ntfyRequest(n: Notification, env: NtfyEnv = process.env): { url:
  * entry, so failures are logged to the server console only.
  */
 export async function sendNotifications(items: Notification[], env: NtfyEnv = process.env): Promise<void> {
-  if (!ntfyTopic(env) || items.length === 0) return;
   for (const n of items) {
+    // Club lines need the admin topic; a player's own lines carry their topic.
+    if (!n.topic && !ntfyTopic(env)) continue;
     const { url, init } = ntfyRequest(n, env);
     try {
       const res = await fetch(url, { ...init, signal: AbortSignal.timeout(5000) });

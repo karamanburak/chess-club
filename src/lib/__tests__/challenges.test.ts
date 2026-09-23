@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { awaitsAnswerFrom, challengeCheck, cleanTimeControl, combineDateTime, playedSummary, TIME_CONTROL_RE, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, sentBy, toIcs, upcoming } from "../challenges";
+import { calendarEvent, challengeGameIds, nextSessionColors, parseSession, pruneChallenges, sessionScore } from "../challenges";
+import { awaitsAnswerFrom, challengeCheck, clubChallenges, clubGroup, cleanTimeControl, combineDateTime, playedSummary, TIME_CONTROL_RE, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, recordable, sentBy, toIcs, upcoming } from "../challenges";
 import { db, game, player } from "./fixtures";
 import type { Challenge } from "../types";
 
@@ -43,6 +44,23 @@ describe("effectiveStatus / expireChallenges", () => {
   });
 });
 
+describe("recordable", () => {
+  test("an agreed game stays recordable after it expired, one that was never agreed does not", () => {
+    const agreed = challenge({ at: hours(-30), status: "accepted", whiteId: "a" });
+    const unanswered = challenge({ at: hours(-30) });
+    const d = db([player("a"), player("b")]);
+    d.challenges = [agreed, unanswered];
+    expect(recordable(agreed)).toBe(true);
+    expireChallenges(d, NOW);
+    expect(agreed.status).toBe("expired");
+    expect(recordable(agreed)).toBe(true);
+    expect(unanswered.status).toBe("expired");
+    expect(recordable(unanswered)).toBe(false);
+    expect(recordable(challenge({ status: "declined" }))).toBe(false);
+    expect(recordable(challenge({ status: "played", whiteId: "a" }))).toBe(false);
+  });
+});
+
 describe("who sees what", () => {
   test("pending for the answering side, sent for the proposer, upcoming once accepted", () => {
     const d = db([player("a"), player("b"), player("c")]);
@@ -74,12 +92,25 @@ describe("challengeCheck", () => {
     expect(challengeCheck(d, "a", "b", new Date(NOW - 5 * 60_000).toISOString(), NOW)).toBeNull();
     expect(challengeCheck(d, "a", "b", "nonsense", NOW)).toBe("past");
     expect(challengeCheck(d, "a", "b", hours(1), NOW)).toBeNull();
-    d.challenges = [challenge({ fromId: "b", toId: "a", proposedBy: "b" })];
+    d.challenges = [challenge({ fromId: "b", toId: "a", proposedBy: "b", at: hours(1) })];
+    // the very same minute again is a double send; another day, or right after, is a new game
     expect(challengeCheck(d, "a", "b", hours(1), NOW)).toBe("exists");
-    expect(openBetween(d, "a", "b", NOW)).toBeDefined();
-    // an expired one does not block a new challenge
+    expect(challengeCheck(d, "a", "b", hours(26), NOW)).toBeNull();
+    expect(challengeCheck(d, "a", "b", hours(1.25), NOW)).toBeNull();
+    expect(openBetween(d, "a", "b", NOW)).toHaveLength(1);
+    // an expired one does not count
     d.challenges[0].at = hours(-40);
     expect(challengeCheck(d, "a", "b", hours(1), NOW)).toBeNull();
+    expect(openBetween(d, "a", "b", NOW)).toHaveLength(0);
+  });
+
+  test("two players may arrange a series, up to five open at once, listed soonest first", () => {
+    const d = db([player("a"), player("b")]);
+    d.challenges = [5, 2, 4, 1, 3].map((h, i) => challenge({ id: `c${i}`, at: hours(h * 24) }));
+    expect(openBetween(d, "a", "b", NOW).map((c) => c.at)).toEqual([1, 2, 3, 4, 5].map((h) => hours(h * 24)));
+    expect(challengeCheck(d, "a", "b", hours(6 * 24), NOW)).toBe("tooMany");
+    d.challenges[0].status = "declined";
+    expect(challengeCheck(d, "a", "b", hours(6 * 24), NOW)).toBeNull();
   });
 });
 
@@ -174,5 +205,90 @@ describe("time control field", () => {
     expect(cleanTimeControl("15++10")).toBe("15+10");
     expect(cleanTimeControl("15+10+5")).toBe("15+105");
     expect(cleanTimeControl("blitz")).toBe("");
+  });
+});
+
+describe("pruneChallenges and merge", () => {
+  test("drops challenges of missing players and played ones whose game went", async () => {
+    const { pruneChallenges } = await import("../challenges");
+    const g = game("a", "b", "1-0");
+    const d = db([player("a"), player("b")], [g]);
+    d.challenges = [
+      challenge({ id: "keep" }),
+      challenge({ id: "ghost", toId: "zed" }),
+      challenge({ id: "played", status: "played", gameId: g.id }),
+      challenge({ id: "lost", status: "played", gameId: "gone" }),
+    ];
+    expect(pruneChallenges(d)).toBe(2);
+    expect(d.challenges.map((c) => c.id)).toEqual(["keep", "played"]);
+  });
+
+  test("a merge rewrites challenges and drops one the two records had with each other", async () => {
+    const { mergePlayers } = await import("../merge");
+    const d = db([player("a"), player("b"), player("dup")]);
+    d.challenges = [challenge({ id: "moved", fromId: "dup", toId: "b", proposedBy: "dup", whiteId: "dup" }), challenge({ id: "self", fromId: "dup", toId: "a" })];
+    mergePlayers(d, "dup", "a");
+    expect(d.challenges.map((c) => [c.id, c.fromId, c.toId, c.proposedBy, c.whiteId])).toEqual([["moved", "a", "b", "a", "a"]]);
+  });
+});
+
+describe("clubChallenges (admin overview)", () => {
+  test("groups every challenge, filters by group and player, open ones first by date", () => {
+    const d = db([player("a"), player("b"), player("c")]);
+    d.challenges = [
+      challenge({ id: "later", at: hours(50) }),
+      challenge({ id: "soon", at: hours(5), fromId: "b", toId: "c", status: "accepted", whiteId: "b" }),
+      challenge({ id: "old", status: "played", gameId: "g", updatedAt: hours(-5) }),
+      challenge({ id: "newer", status: "declined", updatedAt: hours(-2) }),
+      challenge({ id: "lapsed", at: hours(-30), updatedAt: hours(-40) }),
+    ];
+    expect(clubChallenges(d, {}, NOW).map((c) => c.id)).toEqual(["soon", "later", "newer", "old", "lapsed"]);
+    expect(clubGroup(d.challenges[4], NOW)).toBe("settled");
+    expect(clubChallenges(d, { status: "settled" }, NOW).map((c) => c.id)).toEqual(["newer", "lapsed"]);
+    expect(clubChallenges(d, { status: "accepted" }, NOW).map((c) => c.id)).toEqual(["soon"]);
+    expect(clubChallenges(d, { playerId: "c" }, NOW).map((c) => c.id)).toEqual(["soon"]);
+  });
+});
+
+describe("sessions", () => {
+  test("parseSession: a single game, a valid session, or invalid values", () => {
+    expect(parseSession("game", "60", "each")).toBeNull();
+    expect(parseSession("session", "120", "each")).toEqual({ minutes: 120, scoring: "each" });
+    expect(parseSession("session", "90", "single")).toEqual({ minutes: 90, scoring: "single" });
+    expect(parseSession("session", "45", "each")).toBe("invalid");
+    expect(parseSession("session", "60", "best-of")).toBe("invalid");
+  });
+
+  test("colours start from the draw and swap game by game; the score adds up per side", () => {
+    const c = challenge({ status: "accepted", whiteId: "b", session: { minutes: 60, scoring: "each" }, gameIds: [] });
+    expect(nextSessionColors(c)).toEqual({ whiteId: "b", blackId: "a" });
+    const g1 = game("b", "a", "1-0");
+    c.gameIds = [g1.id];
+    expect(nextSessionColors(c)).toEqual({ whiteId: "a", blackId: "b" });
+    const g2 = game("a", "b", "1/2-1/2");
+    const g3 = game("b", "a", "0-1");
+    c.gameIds = [g1.id, g2.id, g3.id];
+    const games = new Map([g1, g2, g3].map((g) => [g.id, g]));
+    // a (fromId): lost, drew, won → 1.5; b: 1.5
+    expect(sessionScore(c, games)).toEqual({ from: 1.5, to: 1.5, games: 3 });
+    expect(challengeGameIds(c)).toEqual([g1.id, g2.id, g3.id]);
+    expect(challengeGameIds(challenge({ gameId: "x" }))).toEqual(["x"]);
+  });
+
+  test("the calendar blocks the booked length of a session", () => {
+    const c = challenge({ status: "accepted", timeControl: "3+2", session: { minutes: 120, scoring: "each" } });
+    const ev = calendarEvent(c, { from: "A", to: "B", club: "C" });
+    expect((ev.end.getTime() - ev.start.getTime()) / 60_000).toBe(120);
+  });
+
+  test("pruning keeps a session with games left and drops a finished one whose games all went", () => {
+    const g = game("a", "b", "1-0");
+    const d = db([player("a"), player("b")], [g]);
+    d.challenges = [
+      challenge({ id: "kept", status: "played", session: { minutes: 60, scoring: "each" }, gameIds: [g.id, "gone"] }),
+      challenge({ id: "empty", status: "played", session: { minutes: 60, scoring: "each" }, gameIds: ["gone"] }),
+    ];
+    pruneChallenges(d);
+    expect(d.challenges.map((c) => [c.id, c.gameIds])).toEqual([["kept", [g.id]]]);
   });
 });
