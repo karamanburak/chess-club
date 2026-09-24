@@ -9,7 +9,7 @@ import { avatarChoices } from "@/lib/avatar";
 import { AvatarPicker } from "@/components/AvatarPicker";
 import { achievements, attendance, nextTitle, titleFor } from "@/lib/club";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
-import { changeOwnPin, deletePlayer, resetPin, setNotifyTopic, unclaimProfile, updatePlayer } from "@/lib/actions";
+import { changeOwnPin, deletePlayer, resetPin, unclaimProfile, updatePlayer } from "@/lib/actions";
 import { challengeOpponents, MAX_OPEN_PER_PAIR, openBetween, upcoming } from "@/lib/challenges";
 import { ChallengeCard } from "@/components/ChallengeCard";
 import { ChallengeForm } from "@/components/ChallengeForm";
@@ -342,36 +342,6 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
             </Section>
           )}
 
-          {isMe && !db.settings.memberNotifyOff && (
-            <Section
-              title={
-                <span className="inline-flex items-center gap-2">
-                  <Icon name="bell" className="h-4 w-4 text-accent" /> {msg.challenges.phoneTitle}
-                </span>
-              }
-              right={player.notifyTopic ? <span className="badge border-win/40 text-win">{msg.challenges.phoneOn}</span> : undefined}
-            >
-              <form action={setNotifyTopic} className="flex flex-col gap-3">
-                <input type="hidden" name="playerId" value={player.id} />
-                <p className="text-xs text-muted -mt-1">{msg.challenges.phoneHint}</p>
-                <div className="flex gap-2">
-                  <input
-                    name="topic"
-                    defaultValue={player.notifyTopic ?? ""}
-                    pattern="[A-Za-z0-9_\-]{8,64}"
-                    placeholder="chess-club-me-7f3k9q2m"
-                    aria-label={msg.challenges.phoneTopic}
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="flex-1 min-w-0 font-mono"
-                  />
-                  <SubmitButton className="btn" pendingText={msg.common.saving}>
-                    {msg.challenges.phoneSave}
-                  </SubmitButton>
-                </div>
-              </form>
-            </Section>
-          )}
 
           {admin && (
             <>

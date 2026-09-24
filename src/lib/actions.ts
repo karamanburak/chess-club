@@ -13,7 +13,6 @@ import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireCha
 import { RESULTS, recomputeRatings } from "./elo";
 import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
-  formatDateTime,
   activeParticipants,
   activeSession,
   colorStats,
@@ -39,7 +38,9 @@ import { applyReset, isResetScope, type ResetScope } from "./reset";
 import { SKIP_COOKIE, SKIP_DAYS } from "./tokens";
 import { dicts, fmt, isLang, LANG_COOKIE, pickLang, type Dict, type Lang } from "./i18n";
 import { getT } from "./lang";
-import { ntfyTopic, PLAYER_TOPIC_RE, sendNotifications, type Notification } from "./notify";
+import { ntfyTopic, sendNotifications, type Notification } from "./notify";
+import { sendSlack, slackEscape, slackWebhook, type SlackMessage } from "./slack";
+import { slackLine, type SlackFacts } from "./slack-lines";
 import { requestOrigin } from "./request-url";
 import { dayOf, localDay, localStamp, zonedToUtc } from "./time";
 import { currentSeason, seasonTable } from "./club";
@@ -88,24 +89,27 @@ function revalidateAll() {
 /* Action plumbing: user-facing errors, activity log                   */
 /* ------------------------------------------------------------------ */
 
-/** A phone notification queued inside mutate(), with the state it was written into (sent only if that one was saved). */
+/** A phone notification or Slack post queued inside mutate(), with the state it was written into (sent only if that one was saved). */
 type PendingNote = Notification & { from: Database };
+type PendingSlack = SlackMessage & { from: Database };
 
 interface Actor {
   admin: boolean;
   owner?: boolean;
   /** Address the request came in on, for the "tap to open" link of phone notifications. */
   origin: string;
-  /** Activity lines written during this action, sent to the phone once the action is through. */
+  /** Activity lines written during this action, sent to the admin's phone once the action is through. */
   notes: PendingNote[];
-  /** The claimed player acting, so personal notifications skip the person who caused them. */
+  /** Challenge news for the club's Slack channel, sent the same way. */
+  slack: PendingSlack[];
+  /** The claimed player acting. */
   me: string | null;
 }
 
 const actor = new AsyncLocalStorage<Actor>();
 
 async function beginActor(): Promise<Actor> {
-  return { admin: await isAdmin(), origin: await requestOrigin(), notes: [], me: await currentPlayerId() };
+  return { admin: await isAdmin(), origin: await requestOrigin(), notes: [], slack: [], me: await currentPlayerId() };
 }
 
 /** A redirect() is a thrown signal, not a failure: the action's writes went through. */
@@ -119,14 +123,14 @@ function isRedirect(e: unknown): boolean {
  * is sent once.
  */
 function notifyPhone(a: Actor): void {
-  const club = !!ntfyTopic();
-  const seen = new Set<string>();
-  const items = a.notes
-    .filter((n) => wasPersisted(n.from))
-    .filter((n) => (n.topic || club) && !seen.has(`${n.topic ?? ""}|${n.text}`) && seen.add(`${n.topic ?? ""}|${n.text}`))
-    .map((n): Notification => ({ text: n.text, title: n.title, admin: n.admin, url: n.url, ...(n.topic ? { topic: n.topic } : {}) }));
-  if (items.length === 0) return;
-  after(() => sendNotifications(items));
+  const once = <T extends { text: string; from: Database }>(list: T[]) => {
+    const seen = new Set<string>();
+    return list.filter((n) => wasPersisted(n.from) && !seen.has(n.text) && seen.add(n.text));
+  };
+  const phone = ntfyTopic() ? once(a.notes).map((n): Notification => ({ text: n.text, title: n.title, admin: n.admin, url: n.url })) : [];
+  const slack = slackWebhook() ? once(a.slack).map((n): SlackMessage => ({ text: n.text, url: n.url, linkLabel: n.linkLabel })) : [];
+  if (phone.length) after(() => sendNotifications(phone));
+  if (slack.length) after(() => sendSlack(slack));
 }
 
 /** Builds the URL of the page the request came from, with the message attached as a flash toast. */
@@ -202,30 +206,15 @@ function log(db: Database, text: string): void {
   if (!db.settings.clubNotifyOff) who?.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: who.origin ? `${who.origin}/admin#activity` : "", from: db });
 }
 
-/** The notify messages in the club's language: the recipient is not the one making the request. */
-function notifyMsgs(db: Database): Dict["challenges"]["notify"] {
-  return dicts[pickLang(db.settings.language)].challenges.notify;
-}
-
 /**
- * Pushes a line about challenge `c` to the players in it who set up their own topic, except whoever caused it.
- * Queued like log() lines and sent after the action went through.
+ * Posts a line about challenge `c` to the club's Slack channel (new, agreed, result), in the club's language.
+ * Queued like log() lines and sent after the action went through; nothing while the switch is off or no webhook is set.
  */
-function actorName(db: Database): string {
+function tellClub(db: Database, c: Challenge, text: (m: Dict["challenges"]["slack"], f: SlackFacts) => string): void {
   const who = actor.getStore();
-  return who?.me ? nameOf(db, who.me) : notifyMsgs(db).admin;
-}
-
-function tellPlayers(db: Database, c: Challenge, text: (m: Dict["challenges"]["notify"], when: string) => string): void {
-  const who = actor.getStore();
-  if (!who || db.settings.memberNotifyOff) return;
+  if (!who || db.settings.slackOff || !slackWebhook()) return;
   const lang = pickLang(db.settings.language);
-  const line = text(notifyMsgs(db), formatDateTime(c.at, lang));
-  for (const id of [c.fromId, c.toId]) {
-    if (id === who.me) continue;
-    const topic = db.players.find((p) => p.id === id)?.notifyTopic;
-    if (topic) who.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: `${who.origin}/challenges`, topic, from: db });
-  }
+  who.slack.push({ text: slackLine(db, c, lang, text), url: who.origin ? `${who.origin}/challenges` : "", linkLabel: dicts[lang].challenges.slack.link, from: db });
 }
 
 /** Who is acting: the admin may edit any game, a claimed device only its own boards. */
@@ -426,9 +415,9 @@ export async function clearOwnerPassword(owner?: string) {
   });
 }
 
-const SWITCHES = { selfSignup: "selfSignupOff", clubNotify: "clubNotifyOff", memberNotify: "memberNotifyOff" } as const;
+const SWITCHES = { selfSignup: "selfSignupOff", clubNotify: "clubNotifyOff", slack: "slackOff" } as const;
 export type SwitchKey = keyof typeof SWITCHES;
-const SWITCH_LOG: Record<SwitchKey, string> = { selfSignup: "Self sign-up", clubNotify: "Admin phone notifications", memberNotify: "Members' phone notifications" };
+const SWITCH_LOG: Record<SwitchKey, string> = { selfSignup: "Self sign-up", clubNotify: "Admin phone notifications", slack: "Slack channel posts" };
 
 /** Flips one of the plain on/off switches on Admin. */
 export async function setSwitch(key: SwitchKey, on: boolean) {
@@ -993,29 +982,6 @@ export async function changeOwnPin(fd: FormData) {
   });
 }
 
-/** A player sets (or clears) their own ntfy topic for challenge news. Self only: it is their phone. */
-export async function setNotifyTopic(fd: FormData) {
-  return run(async () => {
-    const id = str(fd, "playerId");
-    const E = await msgs();
-    if ((await currentPlayerId()) !== id) throw new UserError(E.notifyNotYours);
-    const topic = str(fd, "topic");
-    if (topic && !PLAYER_TOPIC_RE.test(topic)) throw new UserError(E.notifyTopicFormat);
-    await mutate((d) => {
-      const p = d.players.find((x) => x.id === id);
-      if (!p) throw new UserError(E.playerNotFound);
-      if (topic) p.notifyTopic = topic;
-      else delete p.notifyTopic;
-      // The topic itself stays out of the log: it is the only secret of the subscription.
-      log(d, topic ? `${p.name} turned on phone notifications` : `${p.name} turned off phone notifications`);
-      const who = actor.getStore();
-      if (topic && who) who.notes.push({ text: fmt(notifyMsgs(d).test, { name: p.name }), title: d.settings.club.name, admin: false, url: `${who.origin}/challenges`, topic, from: d });
-    });
-    revalidateAll();
-    redirect(noticeUrl(`/players/${id}`, topic ? E.notifyOn : E.notifyOff));
-  });
-}
-
 /** Admin sets a new PIN for someone who forgot theirs, or clears it so they choose one on their next claim. */
 export async function resetPin(id: string, fd: FormData) {
   return run(async () => {
@@ -1158,7 +1124,7 @@ export async function createChallenge(_prev: ChallengeFormState, fd: FormData): 
       });
       const what = session ? ` (session ${session.minutes} min, ${session.scoring === "each" ? "every game counts" : "one game"})` : "";
       log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${localStamp(at)}${what}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
-      tellPlayers(db, db.challenges[db.challenges.length - 1], (m, when) => fmt(m.challenged, { name: nameOf(db, fromId), when }));
+      tellClub(db, db.challenges[db.challenges.length - 1], (m, f) => fmt(m.created, f));
     });
     revalidateAll();
   });
@@ -1188,7 +1154,7 @@ export async function answerChallenge(id: string, answer: "accept" | "decline") 
       c.whiteId = c.status === "accepted" ? drawColors(c).whiteId : null;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} ${c.status}${c.whiteId ? `, ${nameOf(db, c.whiteId)} has white` : ""}`);
-      tellPlayers(db, c, (m, when) => fmt(c.status === "accepted" ? m.accepted : m.declined, { name: actorName(db), when }));
+      if (c.status === "accepted") tellClub(db, c, (m, f) => fmt(m.accepted, f));
     });
     revalidateAll();
   });
@@ -1218,7 +1184,6 @@ export async function proposeChallengeTime(id: string, fd: FormData) {
       c.proposedBy = who.me && involves(c, who.me) ? who.me : c.fromId;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}: new time ${localStamp(at)} proposed by ${nameOf(db, c.proposedBy)}`);
-      tellPlayers(db, c, (m, when) => fmt(m.newTime, { name: actorName(db), when }));
     });
     revalidateAll();
   });
@@ -1237,7 +1202,6 @@ export async function cancelChallenge(id: string) {
       c.status = "cancelled";
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} withdrawn`);
-      tellPlayers(db, c, (m, when) => fmt(m.withdrawn, { name: actorName(db), when }));
     });
     revalidateAll();
   });
@@ -1272,7 +1236,7 @@ export async function recordChallengeResult(id: string, fd: FormData) {
       c.gameId = g.id;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge played: ${nameOf(db, whiteId)} – ${nameOf(db, blackId)} ${resultLabel(result)}`);
-      tellPlayers(db, c, (m) => fmt(m.result, { name: actorName(db), game: `${nameOf(db, whiteId)} ${resultLabel(result)} ${nameOf(db, blackId)}` }));
+      tellClub(db, c, (m) => fmt(m.result, { game: slackEscape(`${nameOf(db, whiteId)} ${resultLabel(result)} ${nameOf(db, blackId)}`) }));
       recomputeRatings(db);
     });
     revalidateAll();
@@ -1328,7 +1292,7 @@ export async function finishSession(id: string) {
       const score = sessionScore(c, new Map(db.games.map((g) => [g.id, g])));
       const line = `${nameOf(db, c.fromId)} ${scoreText(score.from)}–${scoreText(score.to)} ${nameOf(db, c.toId)}`;
       log(db, `Session finished: ${line} (${score.games} games)`);
-      tellPlayers(db, c, (m) => fmt(m.sessionResult, { name: actorName(db), score: line }));
+      tellClub(db, c, (m) => fmt(m.sessionResult, { score: slackEscape(line), games: String(score.games) }));
     });
     revalidateAll();
   });

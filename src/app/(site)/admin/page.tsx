@@ -10,6 +10,7 @@ import { currentSeason, seasonTable, seasonOverdue } from "@/lib/club";
 import { RESET_SCOPES, resetCounts } from "@/lib/reset";
 import { requestOrigin } from "@/lib/request-url";
 import { ntfyLabel, ntfyTopic } from "@/lib/notify";
+import { slackWebhook } from "@/lib/slack";
 import { localDay } from "@/lib/time";
 import { checkHealth } from "@/lib/health";
 import { Qr } from "@/components/Qr";
@@ -260,7 +261,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
       <span className="shrink-0">{control}</span>
     </li>
   );
-  const toggle = (key: "selfSignup" | "clubNotify" | "memberNotify", on: boolean) => (
+  const toggle = (key: "selfSignup" | "clubNotify" | "slack", on: boolean) => (
     <form action={setSwitch.bind(null, key, !on)}>
       <SubmitButton className={on ? "btn btn-sm" : "btn btn-sm btn-primary"} pendingText="…">
         {on ? sw.turnOff : sw.turnOn}
@@ -268,6 +269,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
     </form>
   );
   const clubFeedReady = !!ntfyTopic();
+  const slackReady = !!slackWebhook();
   const Switches = (
     <Section title={sw.title} right={<span className="text-xs text-muted">{sw.hint}</span>}>
       <ul className="grid gap-2 lg:grid-cols-2 text-sm">
@@ -291,7 +293,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             ) })}
         {switchRow({ label: sw.signup.label, hint: sw.signup.hint, on: !db.settings.selfSignupOff, control: toggle("selfSignup", !db.settings.selfSignupOff) })}
         {switchRow({ label: sw.clubNotify.label, hint: sw.clubNotify.hint, on: clubFeedReady ? !db.settings.clubNotifyOff : null, note: clubFeedReady ? undefined : sw.clubNotify.missing, control: clubFeedReady ? toggle("clubNotify", !db.settings.clubNotifyOff) : null })}
-        {switchRow({ label: sw.memberNotify.label, hint: sw.memberNotify.hint, on: !db.settings.memberNotifyOff, control: toggle("memberNotify", !db.settings.memberNotifyOff) })}
+        {switchRow({ label: sw.slack.label, hint: sw.slack.hint, on: slackReady ? !db.settings.slackOff : null, note: slackReady ? undefined : sw.slack.missing, control: slackReady ? toggle("slack", !db.settings.slackOff) : null })}
       </ul>
     </Section>
   );

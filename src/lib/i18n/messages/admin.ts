@@ -300,7 +300,7 @@ const en = {
     member: { label: "Member code", hint: "Visitors type a shared code once before they see the club." },
     signup: { label: "Self sign-up", hint: "\"I am new, join the club\" on Who are you? and Players. Off: only the admin adds players." },
     clubNotify: { label: "Admin phone notifications", hint: "Every activity-log line to the NTFY_TOPIC phone.", missing: "Set NTFY_TOPIC in the server environment first." },
-    memberNotify: { label: "Members' phone notifications", hint: "Challenge news to each member's own ntfy topic, set on their profile." },
+    slack: { label: "Slack channel", hint: "New, agreed and played challenges posted to the club's Slack channel: names, time, place and format only.", missing: "Set SLACK_WEBHOOK_URL in the server environment first." },
   },
   member: {
     title: "Member code",
@@ -607,7 +607,7 @@ const de: typeof en = {
     member: { label: "Mitgliedscode", hint: "Besucher geben einmal einen gemeinsamen Code ein, bevor sie den Verein sehen." },
     signup: { label: "Selbst anmelden", hint: "\"Ich bin neu\" unter Wer bist du? und Spieler. Aus: nur der Admin legt Spieler an." },
     clubNotify: { label: "Admin-Handybenachrichtigungen", hint: "Jede Zeile des Aktivitätsprotokolls an das NTFY_TOPIC-Handy.", missing: "Setze zuerst NTFY_TOPIC in der Server-Umgebung." },
-    memberNotify: { label: "Handybenachrichtigungen der Mitglieder", hint: "Neuigkeiten zu Herausforderungen an das eigene ntfy-Thema jedes Mitglieds, einzurichten im Profil." },
+    slack: { label: "Slack-Kanal", hint: "Neue, vereinbarte und gespielte Herausforderungen im Slack-Kanal des Vereins: nur Namen, Zeit, Ort und Format.", missing: "Setze zuerst SLACK_WEBHOOK_URL in der Server-Umgebung." },
   },
   member: {
     title: "Mitgliedscode",

@@ -1,0 +1,48 @@
+// The daily puzzle on the home page. Keep values plain strings; placeholders are {n}. `de` must mirror `en` exactly.
+const en = {
+  title: "Puzzle of the day",
+  toMove: { w: "White to move", b: "Black to move" },
+  goal: { mate1: "Mate in 1", mate2: "Mate in 2", best: "Find the best move" },
+  rating: "Rating {n}",
+  yourMove: "Tap a piece, then the square it goes to.",
+  keepGoing: "Correct. Keep going…",
+  wrong: "Not the move. Try again.",
+  solved: { one: "Solved on the first try!", other: "Solved after {n} tries." },
+  shown: "That was the solution. A new puzzle comes at midnight.",
+  tomorrow: "A new puzzle comes at midnight.",
+  hint: "Hint",
+  hintShown: "The glowing piece makes the move. Where does it go?",
+  solvedWithHint: "Solved with a hint.",
+  showSolution: "Show solution",
+  startOver: "Start over",
+  openLichess: "Open on Lichess",
+  source: "Puzzle from the Lichess database",
+  board: "Puzzle board",
+  pieces: { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" },
+  colors: { w: "white", b: "black" },
+};
+
+const de: typeof en = {
+  title: "Rätsel des Tages",
+  toMove: { w: "Weiß am Zug", b: "Schwarz am Zug" },
+  goal: { mate1: "Matt in 1", mate2: "Matt in 2", best: "Finde den besten Zug" },
+  rating: "Wertung {n}",
+  yourMove: "Tippe eine Figur an, dann das Feld, auf das sie zieht.",
+  keepGoing: "Richtig. Weiter…",
+  wrong: "Nicht der Zug. Versuch es noch einmal.",
+  solved: { one: "Im ersten Versuch gelöst!", other: "Nach {n} Versuchen gelöst." },
+  shown: "Das war die Lösung. Um Mitternacht kommt ein neues Rätsel.",
+  tomorrow: "Um Mitternacht kommt ein neues Rätsel.",
+  hint: "Tipp",
+  hintShown: "Die leuchtende Figur zieht. Wohin?",
+  solvedWithHint: "Mit Tipp gelöst.",
+  showSolution: "Lösung zeigen",
+  startOver: "Neu beginnen",
+  openLichess: "Auf Lichess öffnen",
+  source: "Rätsel aus der Lichess-Datenbank",
+  board: "Rätselbrett",
+  pieces: { p: "Bauer", n: "Springer", b: "Läufer", r: "Turm", q: "Dame", k: "König" },
+  colors: { w: "weiß", b: "schwarz" },
+};
+
+export const puzzle = { en, de };

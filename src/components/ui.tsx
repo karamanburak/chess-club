@@ -129,9 +129,9 @@ export function Rank({ n }: { n: number }) {
   return <span className="text-muted font-mono text-sm">{n}</span>;
 }
 
-export function Section({ title, right, children, flush }: { title: ReactNode; right?: ReactNode; children: ReactNode; flush?: boolean }) {
+export function Section({ title, right, children, flush, className = "" }: { title: ReactNode; right?: ReactNode; children: ReactNode; flush?: boolean; className?: string }) {
   return (
-    <section className={`card flex flex-col ${flush ? "p-0 overflow-hidden" : ""}`}>
+    <section className={`card flex flex-col ${flush ? "p-0 overflow-hidden" : ""} ${className}`}>
       <div className={`flex flex-wrap items-center justify-between gap-3 ${flush ? "px-5 pt-5 pb-3" : "mb-4"}`}>
         <h2 className="card-title">{title}</h2>
         {right}

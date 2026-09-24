@@ -21,6 +21,7 @@ import { me } from "./messages/me";
 import { nav } from "./messages/nav";
 import { pairing } from "./messages/pairing";
 import { players } from "./messages/players";
+import { puzzle } from "./messages/puzzle";
 import { stats } from "./messages/stats";
 import { tournaments } from "./messages/tournaments";
 import { tv } from "./messages/tv";
@@ -48,6 +49,7 @@ function build(lang: Lang) {
     club: club[lang],
     tv: tv[lang],
     challenges: challenges[lang],
+    puzzle: puzzle[lang],
   };
 }
 

@@ -15,6 +15,9 @@
   --loss: #f87171;
   --draw: #9aa4b8;
   --glow: rgba(228, 169, 59, 0.08);
+  /* Puzzle board: warm wood tones that sit with the gold accent; a touch darker on the dark page. */
+  --sq-light: #d9cba8;
+  --sq-dark: #9c7a4b;
   color-scheme: dark;
 }
 
@@ -33,6 +36,8 @@
   --loss: #dc2626;
   --draw: #64748b;
   --glow: rgba(150, 102, 11, 0.1);
+  --sq-light: #ece1c6;
+  --sq-dark: #b38b57;
   color-scheme: light;
 }
 

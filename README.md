@@ -101,10 +101,11 @@ flowchart LR
 |---|---|---|
 | `DATABASE_URL` | Postgres connection string. Set on Vercel (Neon). Empty means the JSON file. | empty |
 | `CHESS_DATA_DIR` | Folder for `db.json` and `backups/` in file mode. Handy for a second club or a test copy. | `./data` |
-| `ADMIN_RESET_TOKEN` | Enables *Forgot the password?* on `/admin`. Set it, reset, remove it again. | empty |
+| `ADMIN_RESET_TOKEN` | Enables *Forgot the password?* on `/admin` (at least 32 characters, shorter values keep it off). Set it, reset, remove it again. | empty |
 | `CLUB_TIME_ZONE` | IANA zone the club lives in. The server runs in UTC on Vercel; all shown times, "today", challenge dates and month tables use this zone. | `Europe/Berlin` |
 | `NTFY_TOPIC` | Pushes every activity-log line to this [ntfy](https://ntfy.sh) topic, see *Phone notifications*. | empty |
 | `NTFY_URL` | Self-hosted ntfy server. | `https://ntfy.sh` |
+| `SLACK_WEBHOOK_URL` | Posts new, agreed and played challenges to one Slack channel, see *Slack channel*. | empty |
 | `NEXT_DIST_DIR` | Build folder, so a second instance does not fight the first one over `.next`. | `.next` |
 
 Club-level settings (starting Elo, bye points, default tiebreaks, language, passwords, member code) live in the app
@@ -134,6 +135,20 @@ pushed to your phone through [ntfy](https://ntfy.sh), a free open-source push se
 
 Self-hosted ntfy: set `NTFY_URL` to its address. Empty `NTFY_TOPIC` switches the feature off.
 
+## Slack channel
+
+Challenge news can go to one Slack channel, so the club sees who plays whom: a new challenge, an agreed game (date,
+place, time control or session length) and the result. Declined, withdrawn and rescheduled challenges, notes and
+anything else stay in the app.
+
+1. In Slack create an app for your workspace (api.slack.com/apps → *Create New App* → *From scratch*), open
+   *Incoming Webhooks*, switch it on and *Add New Webhook to Workspace*, then pick the channel. In a company
+   workspace a Slack admin may have to approve the app.
+2. Copy the webhook address (`https://hooks.slack.com/services/…`) into `SLACK_WEBHOOK_URL` (Vercel: Settings →
+   Environment Variables) and redeploy. Treat it like a password: anyone who has it can post to that channel.
+3. The *Slack channel* switch on Admin turns the posts on and off. Posts are in the club language and never block or
+   fail an action; an unreachable Slack is only noted in the server log. Only Slack's own webhook host is accepted.
+
 ## Security
 
 - **Admin password** – salted scrypt hash; the signed httpOnly cookie is bound to that hash, so changing the password
@@ -145,7 +160,7 @@ Self-hosted ntfy: set `NTFY_URL` to its address. Empty `NTFY_TOPIC` switches the
   a new code signs everyone out.
 - **Player PIN** – four digits per player; only that device (or the admin) can touch that player's results and profile.
   Devices without a claimed player are guests: every organising action is refused server-side, not only hidden.
-- **Brute-force brake** – five wrong tries lock a PIN, password or code for ten minutes.
+- **Brute-force brake** – five wrong tries lock a PIN, password or code for ten minutes, twice as long after each further lock.
 - **Sign out everyone** – rotates the cookie secret; every device signs in again.
 - **Headers** – Content-Security-Policy, frame and sniffing protection, referrer and permissions policies, `noindex`.
 - **Recovery** – set `ADMIN_RESET_TOKEN`, open `/admin` → *Forgot the password?*, choose admin or owner password, then

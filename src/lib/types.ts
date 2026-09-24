@@ -22,8 +22,6 @@ export interface Player {
   avatar: string;
   /** Four-digit PIN (scrypt hash) that lets the player claim their identity on a device. Unset until first claim or admin reset. */
   pinHash?: string;
-  /** The player's own ntfy topic: challenge news for them is pushed there. Never sent to other devices. */
-  notifyTopic?: string;
   pinFails?: number;
   pinLockedUntil?: string | null;
   /** PIN locks since the last right PIN; each doubles the next (lockout.ts). */
@@ -159,10 +157,10 @@ export interface Settings {
   ownerPasswordHash?: string;
   /** Club-wide member code (scrypt hash). Unset = no code asked, open club. */
   memberCodeHash?: string;
-  /** Switches on Admin (unset = on): "I am new, join the club", the admin's phone feed, members' own challenge pushes. */
+  /** Switches on Admin (unset = on): "I am new, join the club", the admin's phone feed, challenge news in Slack. */
   selfSignupOff?: boolean;
   clubNotifyOff?: boolean;
-  memberNotifyOff?: boolean;
+  slackOff?: boolean;
   sessionSecret?: string;
   /** Brute-force brakes for the admin password and the member code (see src/lib/lockout.ts). */
   adminLock?: Lockout;

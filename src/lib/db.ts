@@ -46,11 +46,13 @@ export function migrate(raw: any): Database {
   if (db.settings.language !== "de") db.settings.language = "en";
   delete db.settings.club.motto; // replaced by the quote of the day
   delete db.settings.club.founded; // removed field
+  delete db.settings.memberNotifyOff; // members' own ntfy topics gave way to the club's Slack channel
   db.version = 2;
 
   for (const g of db.games) {
     if (g.sessionId === undefined) g.sessionId = null;
   }
+  for (const p of db.players ?? []) delete p.notifyTopic; // see memberNotifyOff above
   for (const t of db.tournaments) {
     t.timeControl ??= "";
     t.tiebreaks ??= [...db.settings.defaultTiebreaks];

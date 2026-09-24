@@ -9,12 +9,17 @@ import { activeSession, completedGames, formatDateTime, leaderboard, playerMap, 
 import { Avatar, Empty, FormDots, PlayerLink, Provisional, Rank, RankMove, RatingDelta, Section, StatusBadge, StreakBadge, TitleBadge } from "@/components/ui";
 import { Icon, KnightMark } from "@/components/icons";
 import { QuoteOfTheDay } from "@/components/QuoteOfTheDay";
+import { DailyPuzzle } from "@/components/DailyPuzzle";
+import { lichessPuzzleUrl, puzzleOfTheDay } from "@/lib/puzzles";
+import { localDay } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 const PAGE = 12;
 
 export default async function Home({ searchParams }: PageProps<"/">) {
+  // Chosen on the server by the club's calendar day; the client only gets this one puzzle.
+  const puzzle = puzzleOfTheDay();
   const sp = await searchParams;
   const { t, lang } = await getT();
   const db = await readDb();
@@ -255,7 +260,11 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </Section>
       </div>
 
-      <div className="mt-6 grid gap-6 md:grid-cols-2">
+      <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {/* The puzzle takes a full row on tablets (the board wants width) and a third on desktop. */}
+        <Section title={t.puzzle.title} className="md:col-span-2 lg:col-span-1 lg:order-last">
+          <DailyPuzzle puzzle={puzzle} day={localDay()} url={lichessPuzzleUrl(puzzle)} />
+        </Section>
         <Section title={t.home.tournaments} right={<Link href="/tournaments" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
           {open.length === 0 ? (
             <p className="text-sm text-muted">
