@@ -11,6 +11,7 @@ import { RESET_SCOPES, resetCounts } from "@/lib/reset";
 import { requestOrigin } from "@/lib/request-url";
 import { ntfyLabel, ntfyTopic } from "@/lib/notify";
 import { slackWebhook } from "@/lib/slack";
+import { PuzzleAdminCard } from "@/components/PuzzleAdminCard";
 import { localDay } from "@/lib/time";
 import { checkHealth } from "@/lib/health";
 import { Qr } from "@/components/Qr";
@@ -497,6 +498,11 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
         </div>
       )}
 
+      {tab === "club" && (
+        <div className="mt-6">
+          <PuzzleAdminCard db={db} today={localDay()} t={t} lang={lang} />
+        </div>
+      )}
       {tab === "data" && (
         <div className="grid gap-6 md:grid-cols-2">
           <div className="col-stack">

@@ -41,6 +41,8 @@ import { getT } from "./lang";
 import { ntfyTopic, sendNotifications, type Notification } from "./notify";
 import { sendSlack, slackEscape, slackWebhook, type SlackMessage } from "./slack";
 import { slackLine, type SlackFacts } from "./slack-lines";
+import { puzzleOfTheDay } from "./puzzles";
+import { isSolution } from "./puzzle-stats";
 import { requestOrigin } from "./request-url";
 import { dayOf, localDay, localStamp, zonedToUtc } from "./time";
 import { currentSeason, seasonTable } from "./club";
@@ -1033,6 +1035,7 @@ export async function deletePlayer(id: string) {
         }
       }
       for (const s of db.seasons) if (s.championId === id) s.championId = null;
+      db.puzzleSolves = db.puzzleSolves.filter((x) => x.playerId !== id);
       log(db, `Player ${nameOf(db, id)} deleted together with ${removedGames.size} games`);
       db.players = db.players.filter((p) => p.id !== id);
       pruneChallenges(db);
@@ -1302,6 +1305,36 @@ export async function finishSession(id: string) {
 function scoreText(n: number): string {
   const whole = Math.floor(n);
   return n - whole === 0.5 ? (whole ? `${whole}½` : "½") : String(n);
+}
+
+/**
+ * The daily puzzle finished on a claimed device: stored once per player and day (the first outcome stays, so
+ * "Start over" cannot improve it). A "solved" must carry the solver's moves, checked against today's puzzle.
+ * Guests and an admin device without a claimed player record nothing. Not logged: it is no club change.
+ */
+export async function recordPuzzle(outcome: "solved" | "shown", moves: string[], misses: number, hint: boolean) {
+  return attempt(async () => {
+    const me = await currentPlayerId();
+    if (!me) return;
+    const puzzle = puzzleOfTheDay();
+    if (outcome !== "solved" && outcome !== "shown") return;
+    if (outcome === "solved" && (!Array.isArray(moves) || !isSolution(puzzle, moves.map(String)))) throw new UserError((await msgs()).puzzleNotSolved);
+    const day = localDay();
+    await mutate((db) => {
+      if (db.puzzleSolves.some((x) => x.day === day && x.playerId === me)) return;
+      db.puzzleSolves.push({
+        day,
+        playerId: me,
+        puzzleId: puzzle.id,
+        result: outcome,
+        misses: Math.max(0, Math.min(99, Math.round(Number(misses) || 0))),
+        hint: !!hint,
+        at: new Date().toISOString(),
+      });
+    });
+    revalidatePath("/admin");
+    revalidatePath("/hall-of-fame");
+  });
 }
 
 /* ------------------------------------------------------------------ */

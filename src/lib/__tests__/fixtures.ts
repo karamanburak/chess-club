@@ -53,6 +53,7 @@ export function db(players: Player[], games: Game[] = [], tournaments: Tournamen
     sessions: [],
     seasons: [],
     challenges: [],
+    puzzleSolves: [],
     activity: [],
     settings: {
       startRating: 1200,

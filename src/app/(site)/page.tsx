@@ -44,6 +44,10 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const hl = highlights(db, 14, t.club.highlights);
   const me = await currentPlayerId();
   const admin = await isAdmin();
+  const showPuzzle = !!me || admin;
+  const today = localDay();
+  const mySolve = me ? db.puzzleSolves.find((x) => x.day === today && x.playerId === me) : undefined;
+  const savedPuzzle = mySolve ? { result: mySolve.result, misses: mySolve.misses, hint: mySolve.hint } : null;
   const member = admin || !!me;
   const overdue = season && admin ? seasonOverdue(season) : null;
 
@@ -260,11 +264,14 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </Section>
       </div>
 
-      <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {/* The puzzle takes a full row on tablets (the board wants width) and a third on desktop. */}
-        <Section title={t.puzzle.title} className="md:col-span-2 lg:col-span-1 lg:order-last">
-          <DailyPuzzle puzzle={puzzle} day={localDay()} url={lichessPuzzleUrl(puzzle)} />
-        </Section>
+      <div className={`mt-6 grid gap-6 md:grid-cols-2 ${showPuzzle ? "lg:grid-cols-3" : ""}`}>
+        {/* Members only (a device that entered its PIN, or the admin). The club's own cards come first; the puzzle,
+            a daily extra, sits last: a full row on tablets (the board wants width), a third on desktop. */}
+        {showPuzzle && (
+          <Section title={t.puzzle.title} className="md:col-span-2 lg:col-span-1 lg:order-last">
+            <DailyPuzzle puzzle={puzzle} day={today} url={lichessPuzzleUrl(puzzle)} record={!!me} saved={savedPuzzle} />
+          </Section>
+        )}
         <Section title={t.home.tournaments} right={<Link href="/tournaments" className="btn btn-sm btn-ghost">{t.common.all}</Link>}>
           {open.length === 0 ? (
             <p className="text-sm text-muted">

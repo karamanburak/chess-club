@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { recordPuzzle } from "@/lib/actions";
 import { isPromotion, parseFen, playUci, squareName, type Position } from "@/lib/board";
 import { fmt, plural } from "@/lib/i18n";
 import type { Puzzle } from "@/lib/puzzles";
@@ -14,11 +15,26 @@ const REPLY_MS = 450;
 
 /**
  * The daily puzzle: tap a piece, then its square. "Hint" makes the piece that has to move glow (not where it goes);
- * a puzzle solved after a hint says so. Only the solution's move counts (for a mate, any mating move on the
+ * a puzzle solved after a hint says so. On a claimed device (`record`) the outcome also goes to the server once
+ * (`recordPuzzle`, which checks the moves) and today's stored outcome (`saved`) is shown on every device of the player. Only the solution's move counts (for a mate, any mating move on the
  * last step); the opponent's reply plays by itself. Solved or revealed is remembered per device and day in
  * localStorage, so coming back shows the finished board; nothing is sent to the server.
  */
-export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | "fen" | "moves" | "alt" | "goal" | "rating">; day: string; url: string }) {
+export function DailyPuzzle({
+  puzzle,
+  day,
+  url,
+  record = false,
+  saved = null,
+}: {
+  puzzle: Pick<Puzzle, "id" | "fen" | "moves" | "alt" | "goal" | "rating">;
+  day: string;
+  url: string;
+  /** A claimed player's device: report the outcome to the server. */
+  record?: boolean;
+  /** Today's outcome already stored for this player (from another device or an earlier visit). */
+  saved?: { result: "solved" | "shown"; misses: number; hint: boolean } | null;
+}) {
   const { t } = useT();
   const m = t.puzzle;
   const start = useMemo(() => parseFen(puzzle.fen), [puzzle.fen]);
@@ -35,6 +51,8 @@ export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | 
   const [hint, setHint] = useState<string | null>(null);
   const [hinted, setHinted] = useState(false);
   const busy = useRef(false);
+  /** The solver's own moves so far, sent with a "solved" so the server can check them. */
+  const mine = useRef<string[]>([]);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const done = status === "solved" || status === "shown";
 
@@ -47,16 +65,18 @@ export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | 
 
   useEffect(() => {
     try {
-      // "solved:<misses>", "solved:<misses>:h" after a hint, or "shown"
-      const [saved, missed, usedHint] = (localStorage.getItem(key) ?? "").split(":");
-      if (saved === "solved" || saved === "shown") {
+      // The server's record wins (it follows the player to every device); else this device's own note:
+      // "solved:<misses>", "solved:<misses>:h" after a hint, or "shown".
+      const [local, missed, usedHint] = (localStorage.getItem(key) ?? "").split(":");
+      const done = saved ?? (local === "solved" || local === "shown" ? { result: local, misses: Number(missed) || 0, hint: usedHint === "h" } : null);
+      if (done) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setPos(finalBoard());
         setLast(puzzle.moves[puzzle.moves.length - 1]);
         setPly(puzzle.moves.length);
-        setStatus(saved);
-        setMisses(Number(missed) || 0);
-        setHinted(usedHint === "h");
+        setStatus(done.result);
+        setMisses(done.misses);
+        setHinted(done.hint);
       }
     } catch {
       /* no storage: the puzzle simply starts fresh */
@@ -76,6 +96,12 @@ export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | 
 
   const later = (fn: () => void, ms: number) => timers.current.push(setTimeout(fn, ms));
 
+  /** Fire-and-forget: the board does not wait for the server, and a failed save just is not counted. */
+  const report = (outcome: "solved" | "shown", misses: number, hint: boolean) => {
+    if (!record || saved) return;
+    void recordPuzzle(outcome, mine.current, misses, hint).catch(() => undefined);
+  };
+
   const tryMove = (from: string, to: string) => {
     const expected = puzzle.moves[ply];
     const lastStep = ply === puzzle.moves.length - 1;
@@ -92,10 +118,12 @@ export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | 
     const next = playUci(pos, uci);
     setPos(next);
     setLast(uci);
+    mine.current = [...mine.current, uci];
     if (lastStep) {
       setPly(ply + 1);
       setStatus("solved");
       remember(hinted ? `solved:${misses}:h` : `solved:${misses}`);
+      report("solved", misses, hinted);
       return;
     }
     setStatus("good");
@@ -148,6 +176,7 @@ export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | 
     setPly(puzzle.moves.length);
     setStatus("shown");
     remember("shown");
+    report("shown", misses, hinted);
   };
 
   const startOver = () => {
@@ -162,6 +191,7 @@ export function DailyPuzzle({ puzzle, day, url }: { puzzle: Pick<Puzzle, "id" | 
     setMisses(0);
     setHint(null);
     setHinted(false);
+    mine.current = [];
     try {
       localStorage.removeItem(key);
     } catch {

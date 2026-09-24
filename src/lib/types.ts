@@ -218,6 +218,22 @@ export interface ActivityEntry {
   text: string;
 }
 
+/**
+ * A claimed player's daily-puzzle outcome, one per player and day. `solved` counts for the streak (a hint is allowed
+ * and noted), `shown` means they gave up and looked at the solution. Details are for the admin only; the public
+ * Hall of Fame shows days and streaks.
+ */
+export interface PuzzleSolve {
+  day: string;
+  playerId: string;
+  puzzleId: string;
+  result: "solved" | "shown";
+  /** Wrong moves before the solution. */
+  misses: number;
+  hint: boolean;
+  at: string;
+}
+
 export interface Database {
   version: 2;
   seq: number;
@@ -227,6 +243,7 @@ export interface Database {
   sessions: ClubSession[];
   seasons: Season[];
   challenges: Challenge[];
+  puzzleSolves: PuzzleSolve[];
   activity: ActivityEntry[];
   settings: Settings;
 }

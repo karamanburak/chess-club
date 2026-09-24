@@ -3,6 +3,7 @@ import { recomputeRatings } from "../elo";
 import { achievements, currentSeason, daysUntil, highlights, monthChampions, nextTitle, seasonOverdue, seasonTable, titleFor, TITLE_GAMES, tournamentWinners } from "../club";
 import { db, game, player, tournament } from "./fixtures";
 import type { Season } from "../types";
+import { localDay } from "../time";
 
 describe("titles", () => {
   test("need TITLE_GAMES games and follow rating bands", () => {
@@ -129,13 +130,13 @@ describe("month champions and highlights", () => {
     expect(hl.find((h) => h.key === "busiest")).toMatchObject({ playerId: "a" });
   });
 
-  test("daysUntil", () => {
-    const today = new Date();
-    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    expect(daysUntil(iso(today))).toBe(0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    expect(daysUntil(iso(tomorrow))).toBe(1);
+  test("daysUntil counts in the club's calendar, whatever the machine's time zone", () => {
+    // "Today" is the club's day (Berlin), not the test machine's: late in the evening they differ in Auckland.
+    const today = localDay();
+    const [y, m, d] = today.split("-").map(Number);
+    const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+    expect(daysUntil(today)).toBe(0);
+    expect(daysUntil(tomorrow)).toBe(1);
     expect(daysUntil("")).toBeNull();
   });
 });

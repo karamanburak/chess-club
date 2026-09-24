@@ -89,6 +89,10 @@ export function mergePlayers(db: Database, fromId: string, intoId: string): Merg
   }
   // A challenge the two records had with each other would now be one against oneself.
   db.challenges = db.challenges.filter((c) => c.fromId !== c.toId);
+  // Puzzle days move over; where both records solved the same day, the surviving record's entry stays.
+  const intoDays = new Set(db.puzzleSolves.filter((x) => x.playerId === intoId).map((x) => x.day));
+  db.puzzleSolves = db.puzzleSolves.filter((x) => x.playerId !== fromId || !intoDays.has(x.day));
+  for (const x of db.puzzleSolves) x.playerId = swap(x.playerId, fromId, intoId);
 
   // The surviving record keeps its own identity; it only inherits what it lacks.
   into.pinHash ??= from.pinHash;

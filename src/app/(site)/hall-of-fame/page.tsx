@@ -2,6 +2,8 @@ import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
 import { getT } from "@/lib/lang";
+import { puzzleStats } from "@/lib/puzzle-stats";
+import { localDay } from "@/lib/time";
 import { fmt, plural } from "@/lib/i18n";
 import { achievements, currentSeason, monthChampions, seasonTable, titleFor, TITLES, tournamentWinners } from "@/lib/club";
 import { clubStats, formatDate, formatMonth, leaderboard, playerMap, resultLabel } from "@/lib/queries";
@@ -27,6 +29,11 @@ export default async function HallOfFamePage() {
     .filter((x) => x.earned.length)
     .sort((a, b) => b.earned.length - a.earned.length || b.p.rating - a.p.rating)
     .slice(0, 6);
+  // Public: only days and streaks. How many tries or hints stays on the admin page.
+  const solvers = puzzleStats(db, localDay())
+    .filter((r) => r.solved > 0)
+    .sort((a, b) => b.streak - a.streak || b.solved - a.solved || b.best - a.best)
+    .slice(0, 8);
   const holders = [...TITLES]
     .reverse()
     .map((title) => ({ title, players: leaderboard(db).filter((p) => titleFor(p)?.key === title.key) }))
@@ -175,6 +182,28 @@ export default async function HallOfFamePage() {
                   </div>
                 ))}
               </div>
+            )}
+          </Section>
+
+          <Section title={t.hall.puzzleTitle}>
+            {solvers.length === 0 ? (
+              <p className="text-sm text-muted">{t.hall.puzzleEmpty}</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {solvers.map((r) => (
+                  <li key={r.playerId} className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    <PlayerLink id={r.playerId} name={name(r.playerId)} avatar className="flex-1 font-medium" />
+                    <span className="text-sm">
+                      {r.streak > 0 ? <span className="text-accent font-medium">{plural(r.streak, t.hall.puzzleStreak)}</span> : null}
+                      <span className="text-xs text-muted">
+                        {r.streak > 0 ? " · " : ""}
+                        {plural(r.solved, t.hall.puzzleTotal)}
+                        {r.best > 1 && ` · ${fmt(t.hall.puzzleBest, { n: r.best })}`}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
           </Section>
 

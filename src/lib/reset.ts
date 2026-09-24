@@ -53,13 +53,14 @@ export function resetEverything(db: Database, today?: string): ResetSummary {
   db.sessions = [];
   db.seasons = [freshSeason(today)];
   db.activity = [];
+  db.puzzleSolves = [];
   db.seq = 0;
   return summary;
 }
 
 /**
  * Keeps the players (names, PINs, avatars, notes) but forgets everything they played:
- * games, tournaments, club nights and seasons go, a fresh season opens today. Ratings fall back to
+ * games, tournaments, club nights, seasons and puzzle days go, a fresh season opens today. Ratings fall back to
  * each player's starting rating once the caller replays the (now empty) game list.
  */
 export function resetHistory(db: Database, today?: string): ResetSummary {
@@ -68,6 +69,7 @@ export function resetHistory(db: Database, today?: string): ResetSummary {
   db.tournaments = [];
   db.sessions = [];
   db.seasons = [freshSeason(today)];
+  db.puzzleSolves = [];
   db.seq = 0;
   return summary;
 }

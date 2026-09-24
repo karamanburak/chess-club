@@ -32,6 +32,7 @@ function emptyDb(): Database {
     sessions: [],
     seasons: [],
     challenges: [],
+    puzzleSolves: [],
     activity: [],
     settings: { startRating: 1200, byePoints: 1, defaultTiebreaks: DEFAULT_TIEBREAKS, club: { ...DEFAULT_CLUB } },
   };
@@ -63,6 +64,7 @@ export function migrate(raw: any): Database {
   db.activity ??= [];
   db.seasons ??= [];
   db.challenges ??= [];
+  db.puzzleSolves ??= [];
   for (const c of db.challenges) {
     c.whiteId ??= null;
     c.rated ??= true; // challenges before the rated/unrated choice all counted for Elo
