@@ -131,7 +131,7 @@ export function Nav({ admin, clubName, me, waiting = 0 }: { admin: boolean; club
   const links = buildLinks(t.nav);
   return (
     <>
-    <header className="border-b border-line bg-bg/85 backdrop-blur sticky top-0 z-20 no-print">
+    <header className="border-b border-line bg-bg/85 backdrop-blur sticky top-0 z-20 pt-[env(safe-area-inset-top)] no-print">
       <div className="mx-auto max-w-6xl px-4 h-16 flex items-center gap-4">
         <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
           <KnightMark className="h-10 w-10 text-fg transition group-hover:brightness-110" />

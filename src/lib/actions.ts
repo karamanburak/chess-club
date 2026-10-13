@@ -151,7 +151,7 @@ async function deliverPush(list: PendingPush[]): Promise<void> {
   const jobs = list
     .map((n) => ({ subs: n.from.players.find((p) => p.id === n.playerId)?.pushSubs ?? [], message: { title: n.title, body: n.body, url: n.url } }))
     .filter((j) => j.subs.length);
-  const gone = await sendPush(jobs);
+  const { gone } = await sendPush(jobs);
   if (!gone.length) return;
   await mutate((db) => {
     for (const p of db.players) if (p.pushSubs) p.pushSubs = p.pushSubs.filter((s) => !gone.includes(s.endpoint));
@@ -1065,13 +1065,15 @@ export async function sendTestPush() {
     const p = db.players.find((x) => x.id === me);
     if (!p?.pushSubs?.length) throw new UserError(E.pushNoDevice);
     const { t } = await getT();
-    const gone = await sendPush([{ subs: p.pushSubs, message: { title: db.settings.club.name, body: t.players.push.testBody, url: `/players/${me}` } }], keys);
+    const { gone, failed } = await sendPush([{ subs: p.pushSubs, message: { title: db.settings.club.name, body: t.players.push.testBody, url: `/players/${me}` } }], keys);
     if (gone.length) {
       await mutate((d) => {
         const q = d.players.find((x) => x.id === me);
         if (q?.pushSubs) q.pushSubs = q.pushSubs.filter((x) => !gone.includes(x.endpoint));
       });
     }
+    if (failed.length) throw new UserError(fmt(E.pushFailed, { reason: [...new Set(failed)].join(", ") }));
+    if (gone.length === p.pushSubs.length) throw new UserError(E.pushNoDevice);
   });
 }
 

@@ -76,13 +76,31 @@ export function pushPayload(m: PushMessage): string {
   return JSON.stringify({ title: m.title.slice(0, 100), body: m.body.slice(0, 300), url: m.url.startsWith("/") ? m.url : "/" });
 }
 
+/** What a push service answered when it refused: status plus its reason, e.g. "403 BadJwtToken" from Apple. */
+export function pushFailure(e: unknown): string {
+  const { statusCode, body, message } = (e ?? {}) as { statusCode?: number; body?: unknown; message?: string };
+  let reason = typeof body === "string" ? body.trim() : "";
+  try {
+    const parsed = JSON.parse(reason) as { reason?: unknown };
+    if (typeof parsed?.reason === "string") reason = parsed.reason;
+  } catch {
+    // plain text body, keep it
+  }
+  return [statusCode, reason || message].filter(Boolean).join(" ").slice(0, 200) || "unknown";
+}
+
 /**
  * Sends each message to each of its subscriptions. Never throws; returns the endpoints the push service says are
- * gone (404/410: the phone unsubscribed or the app was removed), so the caller can drop them.
+ * gone (404/410: the phone unsubscribed or the app was removed), so the caller can drop them, and the other refusals
+ * (`pushFailure`), so a test can show them instead of claiming success.
  */
-export async function sendPush(jobs: { subs: PushSub[]; message: PushMessage }[], keys: PushKeys | null = pushKeys()): Promise<string[]> {
-  if (!keys) return [];
+export async function sendPush(
+  jobs: { subs: PushSub[]; message: PushMessage }[],
+  keys: PushKeys | null = pushKeys(),
+): Promise<{ gone: string[]; failed: string[] }> {
+  if (!keys) return { gone: [], failed: [] };
   const gone: string[] = [];
+  const failed: string[] = [];
   const sends = jobs.flatMap(({ subs, message }) =>
     subs.map(async (s) => {
       try {
@@ -95,10 +113,13 @@ export async function sendPush(jobs: { subs: PushSub[]; message: PushMessage }[]
       } catch (e) {
         const status = (e as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) gone.push(s.endpoint);
-        else console.error("[push] send failed", status ?? (e as Error).message);
+        else {
+          failed.push(pushFailure(e));
+          console.error("[push] send failed", new URL(s.endpoint).host, pushFailure(e));
+        }
       }
     }),
   );
   await Promise.all(sends);
-  return gone;
+  return { gone, failed };
 }

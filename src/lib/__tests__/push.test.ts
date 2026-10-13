@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addSubscription, cleanSubscription, MAX_PUSH_SUBS, pushKeys, pushPayload, sendPush } from "../push";
+import { addSubscription, cleanSubscription, MAX_PUSH_SUBS, pushFailure, pushKeys, pushPayload, sendPush } from "../push";
 import { exportable, keepInstallation } from "../export";
 import { db, player } from "./fixtures";
 
@@ -48,7 +48,14 @@ describe("web push", () => {
   });
 
   test("without keys nothing is sent and nothing reported gone", async () => {
-    expect(await sendPush([{ subs: [{ ...sub(1), at: "t" }], message: { title: "a", body: "b", url: "/" } }], null)).toEqual([]);
+    expect(await sendPush([{ subs: [{ ...sub(1), at: "t" }], message: { title: "a", body: "b", url: "/" } }], null)).toEqual({ gone: [], failed: [] });
+  });
+
+  test("a refusal reads as status plus the service's reason", () => {
+    expect(pushFailure({ statusCode: 403, body: '{"reason":"BadJwtToken"}' })).toBe("403 BadJwtToken");
+    expect(pushFailure({ statusCode: 400, body: "bad request\n" })).toBe("400 bad request");
+    expect(pushFailure(new Error("socket hang up"))).toBe("socket hang up");
+    expect(pushFailure(undefined)).toBe("unknown");
   });
 
   test("subscriptions never leave in a backup, and a restore keeps this installation's", () => {
