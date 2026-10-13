@@ -2,7 +2,8 @@ import { newId } from "./db";
 import { UserError } from "./errors";
 import { makeGame } from "./games";
 import { assignColors, bracketSeedOrder, nextPowerOfTwo } from "./pairing";
-import { activeParticipants, colorStats, knockoutRounds, matchState } from "./queries";
+import { scoreFor } from "./elo";
+import { activeParticipants, colorStats, knockoutRounds, matchState, playerMap } from "./queries";
 import type { Database, KnockoutMatch, Tournament } from "./types";
 
 /** The user-facing messages generateKnockoutRound() can throw; the server action passes the translated ones. */
@@ -21,8 +22,8 @@ const DEFAULT_KO_MSGS: KnockoutMessages = {
 export function addMatchGame(db: Database, t: Tournament, m: KnockoutMatch, round: Tournament["rounds"][number]) {
   if (!m.a || !m.b) return;
   // Alternate colors game by game; the first game is balanced on history.
-  const games = new Map(db.games.map((g) => [g.id, g]));
-  const lastGame = m.gameIds.length ? games.get(m.gameIds[m.gameIds.length - 1]) : undefined;
+  const lastId = m.gameIds.at(-1);
+  const lastGame = lastId ? db.games.find((g) => g.id === lastId) : undefined;
   const colors = lastGame
     ? { whiteId: lastGame.blackId, blackId: lastGame.whiteId }
     : assignColors(m.a, m.b, colorStats(db, { tournamentId: t.id }));
@@ -31,6 +32,21 @@ export function addMatchGame(db: Database, t: Tournament, m: KnockoutMatch, roun
   db.games.push(g);
   m.gameIds.push(g.id);
   round.pairings.push({ board, whiteId: g.whiteId, blackId: g.blackId, gameId: g.id });
+}
+
+/** Who goes through when both sides of a match withdrew: the better seed, side A when neither has one. */
+function doubleWalkoverWinner(m: KnockoutMatch): string | null {
+  const seedA = m.seedA ?? Number.POSITIVE_INFINITY;
+  const seedB = m.seedB ?? Number.POSITIVE_INFINITY;
+  return seedB < seedA ? m.b : m.a;
+}
+
+/** Removes the given games from the db, the round's boards and the match. */
+function dropGames(db: Database, round: Tournament["rounds"][number], m: KnockoutMatch, ids: Set<string>) {
+  if (!ids.size) return;
+  db.games = db.games.filter((x) => !ids.has(x.id));
+  round.pairings = round.pairings.filter((p) => !ids.has(p.gameId));
+  m.gameIds = m.gameIds.filter((id) => !ids.has(id));
 }
 
 /** Keeps every match consistent with its games: adds tiebreak games on ties, removes stale ones, sets winners. */
@@ -48,39 +64,39 @@ export function syncKnockout(db: Database, t: Tournament) {
     }
     // A withdrawal hands the match to the opponent: its unplayed games go, so the round can complete. Once a later
     // round exists the match is history and stays as played; the withdrawn winner's next match is handed over instead.
+    // Both sides withdrawn: the better seed goes through on paper and hands the next match over in turn.
     const aOut = withdrawn.has(m.a);
     const bOut = withdrawn.has(m.b);
-    if (aOut !== bOut && !t.rounds.some((r) => r.number > m.round)) {
-      const unplayed = new Set(m.gameIds.filter((id) => !games.get(id)?.result));
-      if (unplayed.size) {
-        db.games = db.games.filter((x) => !unplayed.has(x.id));
-        round.pairings = round.pairings.filter((p) => !unplayed.has(p.gameId));
-        m.gameIds = m.gameIds.filter((id) => !unplayed.has(id));
-      }
-      m.winnerId = aOut ? m.b : m.a;
+    if ((aOut || bOut) && !t.rounds.some((r) => r.number > m.round)) {
+      dropGames(db, round, m, new Set(m.gameIds.filter((id) => !games.get(id)?.result)));
+      m.winnerId = aOut && bOut ? doubleWalkoverWinner(m) : aOut ? m.b : m.a;
       continue;
     }
+    // Extra games are justified only by a tie: drop every unplayed one unless the base games are complete and the
+    // score before it is level, and then keep only the first (a corrected base result removes a stale tiebreak).
     const base = ko.gamesPerMatch;
-    const baseUnplayed = m.gameIds.slice(0, base).some((id) => !games.get(id)?.result);
-    // Drop unplayed extra games that are no longer justified.
-    const keep: string[] = [];
-    let removed = false;
+    const stale = new Set<string>();
+    let scoreA = 0;
+    let scoreB = 0;
+    let allPlayed = true;
     m.gameIds.forEach((id, i) => {
       const g = games.get(id);
-      if (!g) return;
-      const isExtra = i >= base;
-      const lastUnplayedExtra = isExtra && !g.result && i === m.gameIds.length - 1;
-      if (isExtra && !g.result && (baseUnplayed || !lastUnplayedExtra)) {
-        db.games = db.games.filter((x) => x.id !== id);
-        round.pairings = round.pairings.filter((p) => p.gameId !== id);
-        removed = true;
+      if (!g) {
+        stale.add(id);
         return;
       }
-      keep.push(id);
+      if (g.result) {
+        const sw = scoreFor(g.result, "white");
+        scoreA += g.whiteId === m.a ? sw : 1 - sw;
+        scoreB += g.whiteId === m.a ? 1 - sw : sw;
+        return;
+      }
+      if (i >= base && !(allPlayed && scoreA === scoreB)) stale.add(id);
+      allPlayed = false;
     });
-    if (removed) m.gameIds = keep;
+    dropGames(db, round, m, stale);
 
-    const st = matchState(db, m);
+    const st = matchState(db, m, games);
     if (st.pending > 0) {
       m.winnerId = null;
       continue;
@@ -88,6 +104,8 @@ export function syncKnockout(db: Database, t: Tournament) {
     if (st.scoreA === st.scoreB) {
       m.winnerId = null;
       addMatchGame(db, t, m, round); // tiebreak, colors swapped
+      const added = db.games.at(-1);
+      if (added) games.set(added.id, added);
     } else {
       m.winnerId = st.scoreA > st.scoreB ? m.a : m.b;
     }
@@ -105,8 +123,8 @@ export function generateKnockoutRound(db: Database, t: Tournament, msg: Knockout
 
   if (roundNumber === 1) {
     if (t.participantIds.length < 2) throw new UserError(msg.twoParticipants);
-    const players = playerMapRatings(db);
-    const seeds = activeParticipants(t).sort((x, y) => (players.get(y) ?? 0) - (players.get(x) ?? 0));
+    const players = playerMap(db);
+    const seeds = activeParticipants(t).sort((x, y) => (players.get(y)?.rating ?? 0) - (players.get(x)?.rating ?? 0));
     ko.bracketSize = nextPowerOfTwo(seeds.length);
     ko.matches = [];
     const order = bracketSeedOrder(ko.bracketSize);
@@ -124,7 +142,8 @@ export function generateKnockoutRound(db: Database, t: Tournament, msg: Knockout
       if (m.winnerId) continue;
       const aOut = !!m.a && withdrawn.has(m.a);
       const bOut = !!m.b && withdrawn.has(m.b);
-      if (aOut !== bOut) m.winnerId = aOut ? m.b : m.a;
+      if (aOut && bOut) m.winnerId = doubleWalkoverWinner(m);
+      else if (aOut !== bOut) m.winnerId = aOut ? m.b : m.a;
     }
     if (prev.some((m) => !m.winnerId)) throw new UserError(msg.matchesNeedWinner);
     const seedOf = (id: string | null) => {
@@ -149,8 +168,4 @@ export function generateKnockoutRound(db: Database, t: Tournament, msg: Knockout
     if (!m.a || !m.b) continue;
     for (let i = 0; i < ko.gamesPerMatch; i++) addMatchGame(db, t, m, round);
   }
-}
-
-function playerMapRatings(db: Database): Map<string, number> {
-  return new Map(db.players.map((p) => [p.id, p.rating]));
 }

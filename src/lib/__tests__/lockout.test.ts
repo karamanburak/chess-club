@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { clearFails, failAttempt, isLocked, LOCK_MAX_FAILS, LOCK_MINUTES, lockMinutesLeft, nextLockMinutes, reserveAttempt, type Lockout } from "../lockout";
-import { clearPinFails, pinLocked, registerPinFail, reservePinAttempt } from "../pin";
+import { clearFails, counterFor, failAttempt, isLocked, isLockedFor, LOCK_MAX_FAILS, LOCK_MINUTES, lockMinutesLeft, MAX_TRUSTED_DEVICES, nextLockMinutes, reserveAttempt, trustDevice, type Lockout } from "../lockout";
+import { clearPinFails, pinLocked, pinSucceeded, registerPinFail, reservePinAttempt } from "../pin";
 import { player } from "./fixtures";
 
 const now = Date.parse("2026-09-17T18:00:00Z");
@@ -76,5 +76,50 @@ describe("lockout", () => {
     expect(p.pinLockedUntil).toBeUndefined();
     expect(p.pinLocks).toBeUndefined();
     expect(pinLocked(p)).toBe(false);
+  });
+});
+
+describe("trusted devices", () => {
+  test("strangers locking the shared counter do not lock out a device that answered right before", () => {
+    const l: Lockout = {};
+    trustDevice(l, "mine");
+    for (let i = 0; i < LOCK_MAX_FAILS; i++) wrong(counterFor(l, "stranger"));
+    expect(isLockedFor(l, "stranger", now)).toBe(true);
+    expect(isLockedFor(l, null, now)).toBe(true);
+    expect(isLockedFor(l, "mine", now)).toBe(false);
+    expect(reserveAttempt(counterFor(l, "mine"), now)).toBe(true);
+  });
+
+  test("a trusted device has its own brake: guessing from it still locks it", () => {
+    const l: Lockout = {};
+    trustDevice(l, "phone");
+    for (let i = 0; i < LOCK_MAX_FAILS; i++) wrong(counterFor(l, "phone"));
+    expect(isLockedFor(l, "phone", now)).toBe(true);
+    expect(isLocked(l, now)).toBe(false);
+  });
+
+  test("only the most recent devices stay trusted", () => {
+    const l: Lockout = {};
+    for (let i = 0; i <= MAX_TRUSTED_DEVICES; i++) trustDevice(l, `d${i}`);
+    expect(Object.keys(l.devices!)).toHaveLength(MAX_TRUSTED_DEVICES);
+    expect(l.devices).not.toHaveProperty("d0");
+    trustDevice(l, "d1");
+    trustDevice(l, "new");
+    expect(l.devices).toHaveProperty("d1");
+    expect(l.devices).not.toHaveProperty("d2");
+  });
+
+  test("a PIN: the player's own phone keeps working while strangers are locked, and a new PIN forgets every device", () => {
+    const p = player("p");
+    pinSucceeded(p, "own");
+    for (let i = 0; i < LOCK_MAX_FAILS; i++) {
+      expect(reservePinAttempt(p, now, "thief")).toBe(true);
+      registerPinFail(p, now, "thief");
+    }
+    expect(pinLocked(p, now, "thief")).toBe(true);
+    expect(pinLocked(p, now, "own")).toBe(false);
+    expect(reservePinAttempt(p, now, "own")).toBe(true);
+    clearPinFails(p);
+    expect(p.pinDevices).toBeUndefined();
   });
 });

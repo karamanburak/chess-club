@@ -113,7 +113,7 @@ export function checkHealth(input: Database, m: HealthMsgs = DEFAULT_HEALTH_MSGS
   recomputeRatings(replay);
   for (const p of db.players) {
     const q = replay.players.find((x) => x.id === p.id)!;
-    const keys = (["rating", "gamesPlayed", "wins", "draws", "losses"] as const).filter((k) => p[k] !== q[k]);
+    const keys = (["rating", "gamesPlayed", "ratedGames", "wins", "draws", "losses"] as const).filter((k) => p[k] !== q[k]);
     if (keys.length) warn("ratingDrift", { name: p.name, stored: keys.map((k) => `${k}=${p[k]}`).join(", "), replay: keys.map((k) => `${k}=${q[k]}`).join(", ") });
   }
 

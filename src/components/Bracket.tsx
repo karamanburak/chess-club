@@ -1,6 +1,7 @@
 import type { MatchState } from "@/lib/queries";
 import type { KnockoutMatch, Player } from "@/lib/types";
 import { plural, type Dict } from "@/lib/i18n";
+import { nameOf, scoreText } from "@/lib/score";
 import { Avatar } from "./ui";
 
 export interface BracketRound {
@@ -9,16 +10,21 @@ export interface BracketRound {
   matches: (KnockoutMatch & { state: MatchState })[];
 }
 
-function Side({ id, seed, score, names, winner, loser, pending, walkover, byeLabel }: { id: string | null; seed: number | null; score: number; names: Map<string, Player>; winner: boolean; loser: boolean; pending: boolean; walkover: boolean; byeLabel: string }) {
+function Side({ id, seed, score, names, winner, loser, pending, walkover, byeLabel, winnerLabel }: { id: string | null; seed: number | null; score: number; names: Map<string, Player>; winner: boolean; loser: boolean; pending: boolean; walkover: boolean; byeLabel: string; winnerLabel: string }) {
   if (!id) return <div className="flex items-center gap-2 px-3 py-2 text-muted text-sm italic">{byeLabel}</div>;
-  const name = names.get(id)?.name ?? "?";
+  const name = nameOf(names, id);
   return (
     <div className={`flex items-center gap-2 px-3 py-2 text-sm ${winner ? "font-semibold" : loser ? "text-muted" : ""}`}>
       {seed !== null && <span className="text-[10px] text-muted font-mono w-4 text-right">{seed}</span>}
       <Avatar id={id} name={name} size="xs" />
       <span className="truncate flex-1">{name}</span>
-      {!pending && !walkover && <span className={`font-mono text-xs ${winner ? "text-accent" : "text-muted"}`}>{score === 0.5 ? "½" : score % 1 === 0 ? score : score.toFixed(1).replace(".5", "½")}</span>}
-      {winner && <span className="text-accent">✓</span>}
+      {!pending && !walkover && <span className={`font-mono text-xs ${winner ? "text-accent" : "text-muted"}`}>{scoreText(score)}</span>}
+      {winner && (
+        <>
+          <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden />
+          <span className="sr-only">{winnerLabel}</span>
+        </>
+      )}
     </div>
   );
 }
@@ -42,9 +48,9 @@ export function Bracket({ rounds, names, currentRound, msg }: { rounds: BracketR
                 return (
                   <div key={m.id} className={`rounded-xl border overflow-hidden bg-panel ${m.thirdPlace ? "border-dashed" : ""} ${decided ? "border-line" : r.number === currentRound ? "border-accent/50" : "border-line/60"}`}>
                     {m.thirdPlace && <div className="text-[10px] uppercase tracking-wider text-muted px-3 pt-1.5">{ui.thirdPlace}</div>}
-                    <Side id={m.a} seed={m.seedA} score={m.state.scoreA} names={names} winner={decided && m.winnerId === m.a} loser={decided && m.winnerId !== m.a} pending={pending} walkover={m.state.walkover} byeLabel={msg.common.bye} />
+                    <Side id={m.a} seed={m.seedA} score={m.state.scoreA} names={names} winner={decided && m.winnerId === m.a} loser={decided && m.winnerId !== m.a} pending={pending} walkover={m.state.walkover} byeLabel={msg.common.bye} winnerLabel={msg.tournaments.winner} />
                     <div className="border-t border-line/60" />
-                    <Side id={m.b} seed={m.seedB} score={m.state.scoreB} names={names} winner={decided && m.winnerId === m.b} loser={decided && m.winnerId !== m.b} pending={pending} walkover={m.state.walkover} byeLabel={msg.common.bye} />
+                    <Side id={m.b} seed={m.seedB} score={m.state.scoreB} names={names} winner={decided && m.winnerId === m.b} loser={decided && m.winnerId !== m.b} pending={pending} walkover={m.state.walkover} byeLabel={msg.common.bye} winnerLabel={msg.tournaments.winner} />
                     {!decided && m.state.played > 0 && m.state.pending > 0 && m.state.scoreA === m.state.scoreB && (
                       <div className="text-[10px] text-accent px-3 pb-1.5">{ui.tiebreakPending}</div>
                     )}

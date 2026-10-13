@@ -1,10 +1,10 @@
 import "server-only";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { mutate, readDb } from "./db";
 import { UserError } from "./errors";
 import { requestOrigin } from "./request-url";
-import { ADMIN_COOKIE, ADMIN_HOURS, bindFor, createToken, isAdminToken, ME_COOKIE, ME_DAYS, MEMBER_COOKIE, MEMBER_DAYS, verifyToken } from "./tokens";
+import { ADMIN_COOKIE, ADMIN_HOURS, bindFor, createToken, DEVICE_COOKIE, DEVICE_DAYS, isAdminToken, ME_COOKIE, ME_DAYS, MEMBER_COOKIE, MEMBER_DAYS, verifyToken } from "./tokens";
 
 export { ADMIN_COOKIE as SESSION_COOKIE };
 
@@ -56,10 +56,13 @@ export async function requireAdmin(): Promise<void> {
   if (!(await isAdmin())) throw new UserError("Admin sign-in required for this action.");
 }
 
-/** Issues the admin cookie for the current password. Call it again right after a password change, so this device stays signed in. */
-export async function setSessionCookie(): Promise<void> {
+/**
+ * Issues the admin cookie for the current password. Call it again right after a password change, so this device stays
+ * signed in; pass the hash just written then, as with setMeCookie (a read inside the same request may be cached).
+ */
+export async function setSessionCookie(passwordHash?: string): Promise<void> {
   const jar = await cookies();
-  const hash = (await readDb()).settings.adminPasswordHash;
+  const hash = passwordHash ?? (await readDb()).settings.adminPasswordHash;
   if (!hash) throw new Error("No admin password configured.");
   jar.set(ADMIN_COOKIE, createToken({ role: "admin", exp: Date.now() + ADMIN_HOURS * 3600_000, bind: bindFor(hash) }, await getSecret()), {
     httpOnly: true,
@@ -144,4 +147,27 @@ export async function setMeCookie(playerId: string, pinHash: string): Promise<vo
 export async function clearMeCookie(): Promise<void> {
   const jar = await cookies();
   jar.delete(ME_COOKIE);
+}
+
+/* ------------------------------------------------------------------ */
+/* Device id for the lockout                                           */
+/* ------------------------------------------------------------------ */
+
+function deviceKeyOf(raw: string | undefined): string | null {
+  return raw && /^[A-Za-z0-9_-]{16,64}$/.test(raw) ? createHash("sha256").update(raw).digest("base64url").slice(0, 16) : null;
+}
+
+/** This browser's lockout key (a hash of `cc_dev`, so the stored data never holds the cookie itself), or null when it has none yet. */
+export async function deviceKey(): Promise<string | null> {
+  return deviceKeyOf((await cookies()).get(DEVICE_COOKIE)?.value);
+}
+
+/** Like deviceKey(), but gives the browser a device id first when it has none. Actions only (sets a cookie). */
+export async function ensureDeviceKey(): Promise<string> {
+  const jar = await cookies();
+  const known = deviceKeyOf(jar.get(DEVICE_COOKIE)?.value);
+  if (known) return known;
+  const raw = randomBytes(18).toString("base64url");
+  jar.set(DEVICE_COOKIE, raw, { httpOnly: true, sameSite: "lax", secure: await secureCookies(), path: "/", maxAge: DEVICE_DAYS * 86400 });
+  return deviceKeyOf(raw)!;
 }

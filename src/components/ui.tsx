@@ -16,7 +16,7 @@ export function PageHeader({ title, subtitle, actions, eyebrow }: { title: React
   return (
     <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
       <div className="min-w-0">
-        {eyebrow && <div className="text-[11px] uppercase tracking-wider text-muted mb-1">{eyebrow}</div>}
+        {eyebrow && <div className="text-xs uppercase tracking-wider text-muted mb-1">{eyebrow}</div>}
         <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight">{title}</h1>
         {subtitle && <div className="text-sm text-muted mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">{subtitle}</div>}
       </div>
@@ -91,24 +91,31 @@ export function Empty({ icon = "pawn", title, children }: { icon?: IconName; tit
   );
 }
 
-export function ColorDot({ color, size = "sm" }: { color: "white" | "black"; size?: "sm" | "md" }) {
+/** A piece-colour dot. Announced as "Plays white/black" unless `decorative` (when a visible word already says it). */
+export async function ColorDot({ color, size = "sm", decorative = false }: { color: "white" | "black"; size?: "sm" | "md"; decorative?: boolean }) {
   const sz = size === "md" ? "h-4 w-4" : "h-3 w-3";
+  const { t } = await getT();
+  const label = t.common.plays[color];
   return (
     <span
-      title={color}
+      {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": label, title: label })}
       className={`inline-block rounded-full border shrink-0 ${sz} ${color === "white" ? "bg-white border-white" : "bg-black border-muted/70"}`}
     />
   );
 }
 
 /** Last few results as small dots, oldest to newest. */
-export function FormDots({ results }: { results: ("W" | "D" | "L")[] }) {
+export async function FormDots({ results }: { results: ("W" | "D" | "L")[] }) {
   if (!results.length) return <span className="text-muted text-xs">–</span>;
+  const { t } = await getT();
+  const label = fmt(t.common.formLabel, { list: results.map((r) => t.common.outcome[r]).join(", ") });
   return (
-    <span className="inline-flex items-center gap-1" title={results.join(" ")}>
+    <span className="inline-flex items-center gap-1" title={label}>
+      <span className="sr-only">{label}</span>
       {results.map((r, i) => (
         <span
           key={i}
+          aria-hidden
           className={`h-2 w-2 rounded-full ${r === "W" ? "bg-win" : r === "L" ? "bg-loss" : "bg-draw/70"}`}
         />
       ))}
@@ -121,7 +128,7 @@ const MEDAL = ["bg-[#e4a93b] text-[#1a1408] ring-[#f5d78a]", "bg-[#b8bec9] text-
 export function Rank({ n }: { n: number }) {
   if (n <= 3) {
     return (
-      <span className={`inline-grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold ring-1 ring-inset ${MEDAL[n - 1]}`}>
+      <span className={`inline-grid h-6 w-6 place-items-center rounded-full text-xs font-bold ring-1 ring-inset ${MEDAL[n - 1]}`}>
         {n}
       </span>
     );
@@ -144,9 +151,11 @@ export function Section({ title, right, children, flush, className = "" }: { tit
 export async function Provisional({ games }: { games: number }) {
   if (games >= PROVISIONAL_GAMES) return null;
   const { t } = await getT();
+  const label = fmt(t.common.provisional, { games, total: PROVISIONAL_GAMES });
   return (
-    <span className="badge border-muted/40 text-muted" title={fmt(t.common.provisional, { games, total: PROVISIONAL_GAMES })}>
-      P
+    <span className="badge border-muted/40 text-muted" title={label}>
+      <span aria-hidden>{t.common.provisionalShort}</span>
+      <span className="sr-only">{label}</span>
     </span>
   );
 }
@@ -156,8 +165,11 @@ export async function RankMove({ delta }: { delta: number | undefined }) {
   const { t } = await getT();
   return (
     <span className={`font-mono text-xs ${delta > 0 ? "text-win" : "text-loss"}`} title={fmt(plural(Math.abs(delta), t.common.rankMove), { dir: delta > 0 ? t.common.up : t.common.down })}>
-      {delta > 0 ? "▲" : "▼"}
-      {Math.abs(delta)}
+      <span aria-hidden>
+        {delta > 0 ? "▲" : "▼"}
+        {Math.abs(delta)}
+      </span>
+      <span className="sr-only">{fmt(plural(Math.abs(delta), t.common.rankMove), { dir: delta > 0 ? t.common.up : t.common.down })}</span>
     </span>
   );
 }
@@ -172,7 +184,8 @@ export async function StreakBadge({ streak }: { streak: { kind: "W" | "D" | "L";
   return (
     <span className="badge border-win/40 text-win bg-win/10" title={fmt(t.common.streakWins, { n: streak.length })}>
       <Icon name="flame" className="h-3 w-3" aria-hidden />
-      {streak.length}W
+      <span aria-hidden>{fmt(t.common.streakShort, { n: streak.length })}</span>
+      <span className="sr-only">{fmt(t.common.streakWins, { n: streak.length })}</span>
     </span>
   );
 }
@@ -193,11 +206,20 @@ export async function TitleBadge({ title, compact = false }: { title: Title | nu
   // The compact badge (leaderboard rows) only marks the two top bands; lower titles would just add noise.
   if (compact && title.key !== "master" && title.key !== "grandmaster") return null;
   const { t } = await getT();
-  const label = t.club.titles[title.key as keyof typeof t.club.titles] ?? title.label;
+  const key = title.key as keyof typeof t.club.titles;
+  const label = t.club.titles[key] ?? title.label;
+  const hint = fmt(t.common.titleFrom, { title: label, min: title.min });
   return (
-    <span className="badge border-accent/40 text-accent bg-accent/5" title={fmt(t.common.titleFrom, { title: label, min: title.min })}>
-      <span aria-hidden>{title.icon}</span>
-      {compact ? title.short : label}
+    <span className="badge border-accent/40 text-accent bg-accent/5" title={hint}>
+      <Icon name={title.icon} className="h-3.5 w-3.5" />
+      {compact ? (
+        <>
+          <span aria-hidden>{t.club.titleShort[key] ?? title.short}</span>
+          <span className="sr-only">{label}</span>
+        </>
+      ) : (
+        label
+      )}
     </span>
   );
 }
@@ -215,13 +237,35 @@ export async function AchievementChip({ a, size = "sm" }: { a: Achievement; size
       }`}
       title={`${text.description} · ${when ? fmt(t.common.earnedOn, { date: when }) : t.common.notYetEarned}`}
     >
-      <span className={size === "lg" ? "text-2xl leading-none" : "text-lg leading-none"} aria-hidden>
-        {a.icon}
-      </span>
+      <Icon name={a.icon} className={`${size === "lg" ? "h-6 w-6" : "h-5 w-5"} shrink-0 ${earned ? "text-accent" : ""}`} />
       <span className="flex flex-col leading-tight text-left">
         <span className="font-medium">{text.label}</span>
-        <span className="text-[10px] text-muted">{earned ? when : text.description}</span>
+        <span className="text-xs text-muted">{earned ? when : text.description}</span>
       </span>
     </span>
+  );
+}
+
+/** Previous / next page links around "n / total". `href(n)` builds the link for page n (1-based). */
+export async function Pager({ page, pages, href }: { page: number; pages: number; href: (n: number) => string }) {
+  const { t } = await getT();
+  const step = (n: number, label: string, icon: IconName, off: boolean) =>
+    off ? (
+      <span className="btn btn-sm opacity-40" aria-disabled="true" aria-label={label}>
+        <Icon name={icon} className="h-3.5 w-3.5" />
+      </span>
+    ) : (
+      <Link href={href(n)} className="btn btn-sm" aria-label={label} rel={n < page ? "prev" : "next"}>
+        <Icon name={icon} className="h-3.5 w-3.5" />
+      </Link>
+    );
+  return (
+    <nav aria-label={fmt(t.common.pageOf, { n: page, total: pages })} className="inline-flex items-center gap-1 text-xs">
+      {step(Math.max(1, page - 1), t.common.prevPage, "arrow-left", page <= 1)}
+      <span className="text-muted px-2 font-mono" aria-current="page">
+        {page} / {pages}
+      </span>
+      {step(Math.min(pages, page + 1), t.common.nextPage, "arrow-right", page >= pages)}
+    </nav>
   );
 }

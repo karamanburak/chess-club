@@ -18,8 +18,6 @@ const en = {
   event: "Event",
   roundShort: "R{n}",
   friendly: "friendly",
-  prevPage: "Previous page",
-  nextPage: "Next page",
   // admin: a friendly game entered after the fact
   past: {
     title: "Record a past game",
@@ -53,8 +51,6 @@ const de: typeof en = {
   event: "Anlass",
   roundShort: "R{n}",
   friendly: "Freundschaftspartie",
-  prevPage: "Vorherige Seite",
-  nextPage: "Nächste Seite",
   past: {
     title: "Vergangene Partie eintragen",
     hint: "Nur Admin. Eine Freundschaftspartie ohne Herausforderung, oder eine, die damals vergessen wurde. Mitglieder verabreden ihre Partien unter Herausforderungen, wo das Ergebnis danach eingetragen wird.",

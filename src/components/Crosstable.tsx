@@ -1,14 +1,15 @@
 import type { CrossCell, StandingRow } from "@/lib/queries";
 import { fmt, type Dict } from "@/lib/i18n";
+import { scoreText } from "@/lib/score";
 import { Avatar } from "./ui";
 
 function cellLabel(cells: CrossCell[] | undefined, m: Dict["tournaments"]["cross"]): { text: string; cls: string; title: string } {
   if (!cells?.length) return { text: "·", cls: "text-muted/40", title: m.notPlayed };
-  const parts = cells.map((c) => (c.forfeit ? (c.score === 1 ? "+" : "–") : c.score === 0.5 ? "½" : String(c.score)));
+  const parts = cells.map((c) => (c.forfeit ? (c.score === 1 ? "+" : "–") : scoreText(c.score)));
   const total = cells.reduce((s, c) => s + c.score, 0);
   const cls = total === cells.length ? "text-win font-semibold" : total === 0 ? "text-loss" : "text-draw";
   const title = cells
-    .map((c) => fmt(m.cell, { round: c.round, color: c.color === "white" ? m.white : m.black, result: c.forfeit ? m.forfeit : c.score }))
+    .map((c) => fmt(m.cell, { round: c.round, color: c.color === "white" ? m.white : m.black, result: c.forfeit ? m.forfeit : scoreText(c.score) }))
     .join(", ");
   return { text: parts.join(" "), cls, title };
 }

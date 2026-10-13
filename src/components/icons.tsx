@@ -25,12 +25,131 @@ export function KnightMark({ className = "", mono = false, ...rest }: SVGProps<S
   );
 }
 
-export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv" | "settings" | "more" | "clock" | "bolt" | "flame" | "trend" | "sparkle" | "bell";
+export type IconName = "crown" | "pawn" | "rook" | "users" | "list" | "chart" | "trophy" | "sun" | "moon" | "shield" | "swords" | "flag" | "shuffle" | "download" | "edit" | "pin" | "refresh" | "chevron" | "tv" | "settings" | "more" | "clock" | "bolt" | "flame" | "trend" | "sparkle" | "bell" | "knight" | "bishop" | "queen" | "star" | "ticket" | "medal" | "gem" | "hat" | "sword" | "scale" | "owl" | "coffee" | "arrow-left" | "arrow-right" | "close" | "swap" | "check" | "exit";
 
 /** Small line icons, all on the same 24px grid and stroke, so the header reads as one family. */
 export function Icon({ name, className = "h-4 w-4", ...rest }: { name: IconName } & SVGProps<SVGSVGElement>) {
   const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, className, "aria-hidden": true, ...rest };
   switch (name) {
+    case "knight":
+      return (
+        <svg {...common}>
+          <path d="M6 21h12M7.5 18h9M8.5 18c0-2.5 1.5-4 3-5.5-1.5.3-3 .8-4.2 1.6L5.8 12c1-3 2.5-5.5 5-7.2L12 3l1 2c3 1 5 4 4.5 8.5L16.5 18" />
+          <path d="M11 8.5h.01" />
+        </svg>
+      );
+    case "bishop":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="4" r="1.2" />
+          <path d="M12 5.2c-2.6 1.6-4 3.8-4 6.1 0 1.9 1.3 3.2 4 3.2s4-1.3 4-3.2c0-2.3-1.4-4.5-4-6.1zM12.5 8.5l1.5-1.5M9.5 14.5 8 18h8l-1.5-3.5M5.5 21h13" />
+        </svg>
+      );
+    case "queen":
+      return (
+        <svg {...common}>
+          <circle cx="4.5" cy="7" r="1.2" />
+          <circle cx="12" cy="4.5" r="1.2" />
+          <circle cx="19.5" cy="7" r="1.2" />
+          <path d="M5 8.2 7.5 17h9L19 8.2l-4 4.3-3-6.8-3 6.8zM6.5 21h11M7.5 17l-.5 4M16.5 17l.5 4" />
+        </svg>
+      );
+    case "star":
+      return (
+        <svg {...common}>
+          <path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z" />
+        </svg>
+      );
+    case "ticket":
+      return (
+        <svg {...common}>
+          <path d="M3.5 8V6.5h17V8a2.5 2.5 0 0 0 0 5v4.5h-17V13a2.5 2.5 0 0 0 0-5z" />
+          <path d="M14.5 6.5v11" strokeDasharray="1.5 2" />
+        </svg>
+      );
+    case "medal":
+      return (
+        <svg {...common}>
+          <path d="M8 3h3l1.5 5M16 3h-3l-1 3" />
+          <circle cx="12" cy="15" r="5.5" />
+          <path d="m12 12.3.9 1.8 2 .3-1.4 1.4.3 2-1.8-1-1.8 1 .3-2-1.4-1.4 2-.3z" />
+        </svg>
+      );
+    case "gem":
+      return (
+        <svg {...common}>
+          <path d="M7 4h10l4 5-9 11L3 9zM3 9h18M9.5 4 8 9l4 11 4-11-1.5-5" />
+        </svg>
+      );
+    case "hat":
+      return (
+        <svg {...common}>
+          <path d="M7.5 15V5.5c0-.8.7-1.5 1.5-1.5h6c.8 0 1.5.7 1.5 1.5V15M7.5 11.5h9M3 18c0-1.7 4-3 9-3s9 1.3 9 3-4 2.5-9 2.5-9-.8-9-2.5z" />
+        </svg>
+      );
+    case "sword":
+      return (
+        <svg {...common}>
+          <path d="M20 4v3.5L9.5 18 6 14.5 16.5 4zM4.5 13l6.5 6.5M7.5 16.5l-4 4" />
+        </svg>
+      );
+    case "scale":
+      return (
+        <svg {...common}>
+          <path d="M12 3.5v17M7 20.5h10M4.5 6.5h15M6.5 6.5l-3 7a3 3 0 0 0 6 0zM17.5 6.5l-3 7a3 3 0 0 0 6 0z" />
+        </svg>
+      );
+    case "owl":
+      return (
+        <svg {...common}>
+          <path d="M5.5 4.5 8 7h8l2.5-2.5V14a6.5 6.5 0 0 1-13 0z" />
+          <circle cx="9.3" cy="11" r="2" />
+          <circle cx="14.7" cy="11" r="2" />
+          <path d="m11.3 14 .7 1 .7-1M9 21l1.5-2M15 21l-1.5-2" />
+        </svg>
+      );
+    case "coffee":
+      return (
+        <svg {...common}>
+          <path d="M4.5 9h12v5.5a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5zM16.5 10.5h1.5a2.5 2.5 0 0 1 0 5h-1.8M8.5 3.5v2.5M12.5 3.5v2.5" />
+        </svg>
+      );
+    case "arrow-left":
+      return (
+        <svg {...common}>
+          <path d="M19 12H5M11 6l-6 6 6 6" />
+        </svg>
+      );
+    case "arrow-right":
+      return (
+        <svg {...common}>
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+      );
+    case "close":
+      return (
+        <svg {...common}>
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...common}>
+          <path d="m5 12.5 4.5 4.5L19 7.5" />
+        </svg>
+      );
+    case "exit":
+      return (
+        <svg {...common}>
+          <path d="M14 4.5h4.5a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H14M10 16l4-4-4-4M14 12H4" />
+        </svg>
+      );
+    case "swap":
+      return (
+        <svg {...common}>
+          <path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4" />
+        </svg>
+      );
     case "settings":
       return (
         <svg {...common}>

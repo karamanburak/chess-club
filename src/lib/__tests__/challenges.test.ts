@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { calendarEvent, challengeGameIds, nextSessionColors, parseSession, pruneChallenges, sessionScore } from "../challenges";
-import { awaitsAnswerFrom, challengeCheck, clubChallenges, clubGroup, cleanTimeControl, combineDateTime, playedSummary, TIME_CONTROL_RE, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, recordable, sentBy, toIcs, upcoming } from "../challenges";
+import { zonedToUtc } from "../time";
+import { awaitsAnswerFrom, challengeCheck, clubChallenges, clubGroup, cleanTimeControl, playedSummary, TIME_CONTROL_RE, drawColors, effectiveStatus, estimateDurationMinutes, expireChallenges, googleCalendarUrl, history, openBetween, pendingFor, recordable, sentBy, toIcs, upcoming } from "../challenges";
 import { db, game, player } from "./fixtures";
 import type { Challenge } from "../types";
 
@@ -151,12 +152,12 @@ describe("googleCalendarUrl", () => {
   });
 });
 
-describe("combineDateTime / toIcs", () => {
+describe("zonedToUtc / toIcs", () => {
   test("form fields combine into an ISO stamp and reject garbage", () => {
     // 18:30 Berlin summer time is 16:30 UTC, whatever zone the server runs in
-    expect(combineDateTime("2026-09-20", "18:30")).toBe("2026-09-20T16:30:00.000Z");
-    expect(combineDateTime("20.09.2026", "18:30")).toBeNull();
-    expect(combineDateTime("2026-09-20", "6pm")).toBeNull();
+    expect(zonedToUtc("2026-09-20", "18:30")).toBe("2026-09-20T16:30:00.000Z");
+    expect(zonedToUtc("20.09.2026", "18:30")).toBeNull();
+    expect(zonedToUtc("2026-09-20", "6pm")).toBeNull();
   });
 
   test("the calendar file is titled after the club and carries the pairing, place and time", () => {

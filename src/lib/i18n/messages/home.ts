@@ -10,6 +10,12 @@ const en = {
   tournaments: "Tournaments",
   nLive: "{n} live",
   topRated: "Top rated",
+  yourElo: "Your Elo",
+  yourRank: "Your rank",
+  rankOf: "of {n}",
+  yourForm: "Your last games",
+  yourNext: "Your next game",
+  challengeSomeone: "Challenge someone",
   rankings: "Rankings",
   headToHead: "Head-to-head",
   noPlayers: "No players yet",
@@ -27,8 +33,6 @@ const en = {
   recentGames: "Recent games",
   noGamesYet: "No games yet",
   noGamesHint: "Results from club nights, tournaments and friendlies show up here.",
-  prevPage: "Previous page",
-  nextPage: "Next page",
 };
 const de: typeof en = {
   nextNight: "Nächster Vereinsabend {when}",
@@ -41,6 +45,12 @@ const de: typeof en = {
   tournaments: "Turniere",
   nLive: "{n} live",
   topRated: "Bestplatziert",
+  yourElo: "Deine Elo",
+  yourRank: "Dein Platz",
+  rankOf: "von {n}",
+  yourForm: "Deine letzten Partien",
+  yourNext: "Deine nächste Partie",
+  challengeSomeone: "Jemanden herausfordern",
   rankings: "Rangliste",
   headToHead: "Direktvergleich",
   noPlayers: "Noch keine Spieler",
@@ -58,7 +68,5 @@ const de: typeof en = {
   recentGames: "Letzte Partien",
   noGamesYet: "Noch keine Partien",
   noGamesHint: "Ergebnisse aus Vereinsabenden, Turnieren und Freundschaftspartien erscheinen hier.",
-  prevPage: "Vorherige Seite",
-  nextPage: "Nächste Seite",
 };
 export const home = { en, de };

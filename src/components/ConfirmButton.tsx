@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useT } from "./I18nProvider";
+import { fmt } from "@/lib/i18n";
+
+/** How long the armed state waits for the second click; paused while the pointer or focus is on it. */
+const ARMED_MS = 15_000;
 
 /**
  * Two-step destructive action: first click arms it, second click runs the action.
- * Disarms itself after a few seconds. With `password`, the armed state also asks for a
- * secret (the owner password) and passes it to the action as its last argument.
+ * Disarms itself after a while (never while hovered or focused); the armed state is announced.
  */
 export function ConfirmButton({
   action,
@@ -15,63 +18,90 @@ export function ConfirmButton({
   className = "btn btn-danger",
   disabled,
   title,
-  password,
 }: {
-  action: (secret?: string) => Promise<void>;
+  action: () => Promise<void>;
   children: ReactNode;
   confirmLabel?: string;
   className?: string;
   disabled?: boolean;
   title?: string;
-  /** Placeholder of the password field; when set, the field is shown while armed and required. */
-  password?: string;
 }) {
   const { t } = useT();
   const [armed, setArmed] = useState(false);
-  const [secret, setSecret] = useState("");
   const [pending, start] = useTransition();
+  const [hold, setHold] = useState({ hover: false, focus: false });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const wasArmed = useRef(false);
+  const held = hold.hover || hold.focus;
 
   useEffect(() => {
-    if (!armed) return;
-    const timer = setTimeout(() => setArmed(false), password ? 20000 : 5000);
+    if (!armed || held) return;
+    const timer = setTimeout(() => setArmed(false), ARMED_MS);
     return () => clearTimeout(timer);
-  }, [armed, password]);
+  }, [armed, held]);
+
+  // Arming moves focus to the confirm button; disarming hands it back.
+  useEffect(() => {
+    if (armed) confirmRef.current?.focus();
+    if (!armed && wasArmed.current && document.activeElement === document.body) triggerRef.current?.focus();
+    wasArmed.current = armed;
+  }, [armed]);
+
+  const disarm = () => {
+    setArmed(false);
+    setHold({ hover: false, focus: false });
+  };
+  const label = confirmLabel ?? t.pairing.confirmDefault;
 
   const fire = () =>
     start(async () => {
-      await action(password ? secret : undefined);
-      setArmed(false);
-      setSecret("");
+      await action();
+      disarm();
     });
+
+  // Always mounted, so screen readers notice when the text appears.
+  const live = (
+    <span className="sr-only" role="status" aria-live="polite">
+      {armed ? fmt(t.common.confirmArmed, { label }) : ""}
+    </span>
+  );
 
   if (!armed) {
     return (
-      <button type="button" className={className} disabled={disabled || pending} title={title} onClick={() => setArmed(true)}>
-        {children}
-      </button>
+      <>
+        {live}
+        <button ref={triggerRef} type="button" className={className} disabled={disabled || pending} title={title} onClick={() => setArmed(true)}>
+          {children}
+        </button>
+      </>
     );
   }
   return (
-    <span className="inline-flex flex-wrap items-center gap-1.5 fade-up">
-      {password && (
-        <input
-          type="password"
-          value={secret}
-          onChange={(e) => setSecret(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && secret && fire()}
-          placeholder={password}
-          aria-label={password}
-          autoFocus
-          autoComplete="off"
-          className="w-36 text-sm py-1"
-        />
-      )}
-      <button type="button" className="btn btn-sm btn-confirm" disabled={pending || (!!password && !secret)} onClick={fire}>
-        {pending ? "…" : (confirmLabel ?? t.pairing.confirmDefault)}
-      </button>
-      <button type="button" className="btn btn-sm btn-ghost" onClick={() => setArmed(false)} disabled={pending}>
-        {t.common.cancel}
-      </button>
-    </span>
+    <>
+      {live}
+      <span
+        className="inline-flex flex-wrap items-center gap-1.5 fade-up"
+        onMouseEnter={() => setHold((h) => ({ ...h, hover: true }))}
+        onMouseLeave={() => setHold((h) => ({ ...h, hover: false }))}
+        onFocus={() => setHold((h) => ({ ...h, focus: true }))}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHold((h) => ({ ...h, focus: false }));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && !pending) {
+            e.stopPropagation();
+            disarm();
+          }
+        }}
+      >
+        <button ref={confirmRef} type="button" className="btn btn-sm btn-confirm" disabled={pending} onClick={fire}>
+          {pending ? "…" : label}
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={disarm} disabled={pending}>
+          {t.common.cancel}
+        </button>
+      </span>
+    </>
   );
 }

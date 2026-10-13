@@ -16,6 +16,12 @@ export const ME_COOKIE = "cc_me";
 export const SKIP_COOKIE = "cc_skip";
 export const SKIP_DAYS = 30;
 /**
+ * A random id per browser, set the first time the device gives a right PIN, password or code. It proves nothing by
+ * itself; it only lets the lockout give a device that answered right before a counter of its own (lockout.ts).
+ */
+export const DEVICE_COOKIE = "cc_dev";
+export const DEVICE_DAYS = 400;
+/**
  * Admin sign-in lasts a club evening, not a month: the admin is usually a player too and signs in on whatever phone
  * is at hand, so a forgotten admin session on someone else's device ends by itself.
  */

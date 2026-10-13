@@ -1,6 +1,7 @@
 "use client";
 
-import { useOptimistic, useState, useTransition } from "react";
+import { useEffect, useId, useOptimistic, useRef, useState, useTransition, type KeyboardEvent } from "react";
+import { Icon } from "./icons";
 import { setGameResult, swapColors } from "@/lib/actions";
 import type { GameResult } from "@/lib/types";
 import { useToast } from "./Toast";
@@ -38,14 +39,46 @@ export function ResultButtons({
 }) {
   const [value, setOptimistic] = useOptimistic(current);
   const [pending, start] = useTransition();
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenuState] = useState(false);
   const toast = useToast();
   const { t } = useT();
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  /** Opens or closes the forfeit menu; closing with `refocus` hands focus back to its button. */
+  const setMenu = (open: boolean, refocus = false) => {
+    setMenuState(open);
+    if (!open && refocus) triggerRef.current?.focus();
+  };
+
+  // Opening moves focus to the first item.
+  useEffect(() => {
+    if (menu) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [menu]);
+
+  const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const go = (i: number) => {
+      e.preventDefault();
+      items[(i + items.length) % items.length]?.focus();
+    };
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu(false, true);
+    } else if (e.key === "ArrowDown") go(at + 1);
+    else if (e.key === "ArrowUp") go(at - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(items.length - 1);
+    else if (e.key === "Tab") setMenu(false);
+  };
 
   const choose = (next: GameResult | null) => {
     const prev = value;
     const target = value === next ? null : next;
-    setMenu(false);
+    setMenu(false, true);
     if (target === null && !allowClear) return;
     start(async () => {
       setOptimistic(target);
@@ -81,6 +114,7 @@ export function ResultButtons({
             type="button"
             disabled={disabled}
             title={active && allowClear ? t.pairing.clickToClear : t.pairing[o.title]}
+            aria-label={t.pairing[o.title]}
             onClick={() => choose(o.value)}
             aria-pressed={active}
             className={`font-mono font-medium border transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${base} ${
@@ -96,43 +130,61 @@ export function ResultButtons({
         );
       })}
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => setMenu((m) => !m)}
+        onClick={() => setMenu(!menu, menu)}
         title={t.pairing.forfeitMore}
-        className={`font-mono border transition-all cursor-pointer disabled:opacity-40 ${base} ${isForfeit ? "bg-accent text-accent-fg border-accent" : "bg-transparent text-muted border-transparent hover:border-line"}`}
+        aria-label={isForfeit ? `${t.pairing[value === "+/-" ? "blackForfeit" : "whiteForfeit"]} · ${t.pairing.forfeitMore}` : t.pairing.forfeitMore}
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        aria-controls={menu ? menuId : undefined}
+        className={`inline-flex items-center justify-center font-mono border transition-all cursor-pointer disabled:opacity-40 ${base} ${isForfeit ? "bg-accent text-accent-fg border-accent" : "bg-transparent text-muted border-transparent hover:border-line"}`}
       >
-        {isForfeit ? (value === "+/-" ? "+/–" : "–/+") : "⋯"}
+        {isForfeit ? (value === "+/-" ? "+/–" : "–/+") : <Icon name="more" className="h-4 w-4" />}
       </button>
       {menu && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
-          <div className="absolute right-0 top-full mt-1 z-40 card p-1.5 min-w-56 flex flex-col gap-0.5 shadow-xl fade-up">
+          <div className="fixed inset-0 z-30" onClick={() => setMenu(false, true)} aria-hidden />
+          <div
+            ref={menuRef}
+            id={menuId}
+            role="menu"
+            aria-label={t.pairing.forfeitMore}
+            onKeyDown={onMenuKey}
+            className="absolute right-0 top-full mt-1 z-40 card p-1.5 min-w-56 flex flex-col gap-0.5 shadow-xl fade-up"
+          >
             {extra.map((o) => (
-              <button key={o.value} type="button" onClick={() => choose(o.value)} className="btn btn-sm btn-ghost justify-start" title={t.pairing[o.title]}>
-                <span className="font-mono w-10 text-left">{o.label}</span>
+              <button key={o.value} type="button" role="menuitem" tabIndex={-1} onClick={() => choose(o.value)} className="btn btn-sm btn-ghost justify-start" title={t.pairing[o.title]}>
+                <span className="font-mono w-10 text-left" aria-hidden>{o.label}</span>
                 <span className="text-muted">{t.pairing[o.absent]}</span>
               </button>
             ))}
             {allowSwap && !value && (
               <button
                 type="button"
+                role="menuitem"
+                tabIndex={-1}
                 className="btn btn-sm btn-ghost justify-start"
                 onClick={() => {
-                  setMenu(false);
+                  setMenu(false, true);
                   start(async () => {
                     const res = await swapColors(gameId);
                     toast.push(res.error ? { text: res.error, tone: "error" } : { text: t.pairing.colorsSwapped, tone: "info" });
                   });
                 }}
               >
-                <span className="w-10 text-left">⇄</span>
+                <span className="w-10 text-left" aria-hidden>
+                  <Icon name="swap" className="h-4 w-4" />
+                </span>
                 <span className="text-muted">{t.pairing.swapColors}</span>
               </button>
             )}
             {value && allowClear && (
-              <button type="button" className="btn btn-sm btn-ghost justify-start" onClick={() => choose(null)}>
-                <span className="w-10 text-left">×</span>
+              <button type="button" role="menuitem" tabIndex={-1} className="btn btn-sm btn-ghost justify-start" onClick={() => choose(null)}>
+                <span className="w-10 text-left" aria-hidden>
+                  <Icon name="close" className="h-4 w-4" />
+                </span>
                 <span className="text-muted">{t.pairing.clearResult}</span>
               </button>
             )}

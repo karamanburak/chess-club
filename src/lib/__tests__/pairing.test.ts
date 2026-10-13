@@ -188,3 +188,41 @@ describe("swiss rematch avoidance", () => {
     expect(out.rematches).toBe(0);
   });
 });
+
+describe("swiss bye and rematches", () => {
+  test("the bye moves up from the lowest score when giving it there would force a rematch", () => {
+    // A and B met already. A bye for C (lowest) leaves only A–B; a bye for B leaves the fresh A–C.
+    const players = [
+      { id: "A", score: 2, rating: 1500 },
+      { id: "B", score: 1, rating: 1500 },
+      { id: "C", score: 0, rating: 1500 },
+    ];
+    const out = generatePairings({ players, previousPairs: new Set([pairKey("A", "B")]), colorStats: new Map(), byeHistory: new Set(), mode: "swiss" });
+    expect(out.byeId).toBe("B");
+    expect(out.rematches).toBe(0);
+  });
+
+  test("falls back to the lowest score when every choice of bye leaves a rematch", () => {
+    const players = [
+      { id: "A", score: 2, rating: 1500 },
+      { id: "B", score: 1, rating: 1500 },
+      { id: "C", score: 0, rating: 1500 },
+    ];
+    const all = new Set([pairKey("A", "B"), pairKey("A", "C"), pairKey("B", "C")]);
+    const out = generatePairings({ players, previousPairs: all, colorStats: new Map(), byeHistory: new Set(), mode: "swiss" });
+    expect(out.byeId).toBe("C");
+    expect(out.rematches).toBe(1);
+  });
+
+  test("never moves the bye to someone who already had one", () => {
+    const players = [
+      { id: "A", score: 2, rating: 1500 },
+      { id: "B", score: 1, rating: 1500 },
+      { id: "C", score: 0, rating: 1500 },
+    ];
+    // B had a bye already, so the next candidate up from C is A (which leaves the fresh B–C).
+    const out = generatePairings({ players, previousPairs: new Set([pairKey("A", "B")]), colorStats: new Map(), byeHistory: new Set(["B"]), mode: "swiss" });
+    expect(out.byeId).toBe("A");
+    expect(out.rematches).toBe(0);
+  });
+});

@@ -103,17 +103,24 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
             <Section title={t.players.list.addPlayer}>
               <form action={addPlayer} className="flex flex-col gap-3">
                 <div>
-                  <label className="label" htmlFor="name">
+                  <label className="label" htmlFor="f-add-name">
                     {t.players.list.name}
                   </label>
-                  <input id="name" name="name" required className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
+                  <input id="f-add-name" name="name" required className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
                 </div>
                 <div>
-                  <label className="label" htmlFor="rating">
+                  <label className="label" htmlFor="f-add-rating">
                     {t.players.list.startingElo}
                   </label>
-                  <input id="rating" name="rating" type="number" defaultValue={db.settings.startRating} min={100} max={3000} className="w-full" />
+                  <input id="f-add-rating" name="rating" type="number" defaultValue={db.settings.startRating} min={100} max={3000} className="w-full" />
                   <p className="text-xs text-muted mt-1.5">{t.players.list.startingEloHint}</p>
+                </div>
+                <div>
+                  <label className="label" htmlFor="f-add-pin">
+                    {t.players.list.initialPin}
+                  </label>
+                  <input id="f-add-pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                  <p className="text-xs text-muted mt-1.5">{t.players.list.initialPinHint}</p>
                 </div>
                 <SubmitButton pendingText={t.players.list.adding}>{t.players.list.addPlayer}</SubmitButton>
               </form>
@@ -145,23 +152,23 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
                     {t.players.list.instead}
                   </p>
                   <div>
-                    <label className="label" htmlFor="name">
+                    <label className="label" htmlFor="f-join-name">
                       {t.players.list.yourName}
                     </label>
-                    <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
+                    <input id="f-join-name" name="name" required minLength={2} className="w-full" placeholder={t.players.list.namePlaceholder} autoComplete="off" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="label" htmlFor="pin">
+                      <label className="label" htmlFor="f-join-pin">
                         {t.players.list.pin4}
                       </label>
-                      <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                      <input id="f-join-pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                     </div>
                     <div>
-                      <label className="label" htmlFor="confirm">
+                      <label className="label" htmlFor="f-join-confirm">
                         {t.players.list.repeat}
                       </label>
-                      <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                      <input id="f-join-confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                     </div>
                   </div>
                   <p className="text-xs text-muted">{fmt(t.players.list.startHint, { rating: db.settings.startRating })}</p>

@@ -1,6 +1,6 @@
 import { readDb } from "@/lib/db";
 import { dayOf } from "@/lib/time";
-import { currentPlayerId, isAdmin } from "@/lib/auth";
+import { currentPlayerId, isAdmin, isMember } from "@/lib/auth";
 import { effectiveStatus, involves, toIcs } from "@/lib/challenges";
 import { getT } from "@/lib/lang";
 
@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 /** Calendar file for one agreed game. Only the two players (or the admin) can fetch it. */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  // /api is outside the proxy's member-code gate, so a device whose club access ended must be refused here.
+  if (!(await isMember())) return new Response("Forbidden", { status: 403 });
   const db = await readDb();
   const c = db.challenges.find((x) => x.id === id);
   if (!c) return new Response("Not found", { status: 404 });

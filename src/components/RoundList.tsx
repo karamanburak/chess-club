@@ -1,5 +1,6 @@
 import type { Game, Player, SessionRound } from "@/lib/types";
 import { getT } from "@/lib/lang";
+import { nameOf, resultLabel } from "@/lib/score";
 import { ColorDot, RatingDelta } from "./ui";
 
 export async function RoundList({ r, games, names }: { r: SessionRound; games: Map<string, Game>; names: Map<string, Player> }) {
@@ -14,14 +15,14 @@ export async function RoundList({ r, games, names }: { r: SessionRound; games: M
               <td className="font-mono text-muted w-12">{p.board}</td>
               <td>
                 <span className="flex items-center gap-2">
-                  <ColorDot color="white" /> {names.get(p.whiteId)?.name}
+                  <ColorDot color="white" /> {nameOf(names, p.whiteId)}
                   <RatingDelta before={g?.whiteRatingBefore ?? null} after={g?.whiteRatingAfter ?? null} />
                 </span>
               </td>
-              <td className="font-mono text-center">{g?.result ? (g.result === "1/2-1/2" ? "½–½" : g.result.replace("-", "–")) : "–"}</td>
+              <td className="font-mono text-center">{resultLabel(g?.result ?? null)}</td>
               <td>
                 <span className="flex items-center gap-2">
-                  <ColorDot color="black" /> {names.get(p.blackId)?.name}
+                  <ColorDot color="black" /> {nameOf(names, p.blackId)}
                   <RatingDelta before={g?.blackRatingBefore ?? null} after={g?.blackRatingAfter ?? null} />
                 </span>
               </td>
@@ -32,7 +33,7 @@ export async function RoundList({ r, games, names }: { r: SessionRound; games: M
           <tr>
             <td className="font-mono text-muted">–</td>
             <td colSpan={3} className="text-muted text-sm">
-              {names.get(r.byePlayerId)?.name} · {t.common.bye}
+              {nameOf(names, r.byePlayerId)} · {t.common.bye}
             </td>
           </tr>
         )}

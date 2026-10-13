@@ -199,9 +199,10 @@ export default async function ChallengesPage({ searchParams }: PageProps<"/chall
           )}
         </div>
         )}
-        {/* On a phone the form comes first but folded, so the lists stay in view; on desktop it is the open right column. */}
+        {/* On a phone the form comes first as one button, so the lists stay in view; it starts open when there is
+            nothing of the player's own to show. On desktop it is the open right column. */}
         <div className="flex flex-col gap-6 order-first lg:order-none">
-          <Foldable title={m.new} hint={m.tapToOpen}>
+          <Foldable title={m.new} openLabel={m.new} icon="swords" defaultOpen={!clubView && toAnswer.length + mine.length + sent.length === 0}>
             <ChallengeForm players={challengeOpponents(db)} me={me} admin={admin} today={localDay()} />
           </Foldable>
         </div>

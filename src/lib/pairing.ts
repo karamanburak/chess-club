@@ -125,6 +125,31 @@ function swissPair(pool: PairingCandidate[], hard: Set<string>, soft: Set<string
   };
 }
 
+/** Nodes the bye check may visit per candidate before it gives up on proving a rematch-free pairing. */
+const BYE_CHECK_BUDGET = 20_000;
+
+/** Whether `pool` can be paired with no hard rematch at all (a quick depth-first search; false when unsure). */
+function pairableWithoutRematch(pool: PairingCandidate[], hard: Set<string>): boolean {
+  const n = pool.length;
+  const used = new Array<boolean>(n).fill(false);
+  let nodes = 0;
+  const search = (): boolean => {
+    if (++nodes > BYE_CHECK_BUDGET) return false;
+    const i = used.indexOf(false);
+    if (i === -1) return true;
+    used[i] = true;
+    for (let j = i + 1; j < n; j++) {
+      if (used[j] || hard.has(pairKey(pool[i].id, pool[j].id))) continue;
+      used[j] = true;
+      if (search()) return true;
+      used[j] = false;
+    }
+    used[i] = false;
+    return false;
+  };
+  return search();
+}
+
 /**
  * Decide who plays white.
  * 1. Nobody gets the same color three times in a row if avoidable.
@@ -166,8 +191,10 @@ export function generatePairings(input: PairingInput): PairingOutput {
     let candidates = pool.filter((p) => !byeHistory.has(p.id));
     if (candidates.length === 0) candidates = pool;
     if (mode === "swiss") {
+      // Lowest score (then rating) first, but skip anyone whose bye would force a rematch on the boards that remain.
       candidates = [...candidates].sort((a, b) => a.score - b.score || a.rating - b.rating);
-      byeId = candidates[0].id;
+      const fits = candidates.find((c) => pairableWithoutRematch(pool.filter((p) => p.id !== c.id), previousPairs));
+      byeId = (fits ?? candidates[0]).id;
     } else {
       byeId = candidates[Math.floor(Math.random() * candidates.length)].id;
     }

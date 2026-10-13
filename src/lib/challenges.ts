@@ -6,7 +6,6 @@
 import type { Challenge, ChallengeSession, ChallengeStatus, Database, Game } from "./types";
 import { scoreFor } from "./elo";
 import { pickable, type PickablePlayer } from "./pick";
-import { sameLocalDay, zonedToUtc } from "./time";
 
 export const EXPIRE_AFTER_MS = 24 * 60 * 60_000;
 export const OPEN: readonly ChallengeStatus[] = ["pending", "accepted"];
@@ -242,16 +241,6 @@ export function challengeCheck(db: Database, fromId: string, toId: string, at: s
   if (open.some((c) => Math.floor(new Date(c.at).getTime() / 60_000) === Math.floor(when / 60_000))) return "exists";
   if (open.length >= MAX_OPEN_PER_PAIR) return "tooMany";
   return null;
-}
-
-/** "2026-09-20" + "18:30" from the form → ISO in the server's local time; null when unparsable. */
-export function combineDateTime(date: string, time: string): string | null {
-  return zonedToUtc(date, time);
-}
-
-/** Same calendar day as `now`, in club time. */
-export function isToday(iso: string, now = new Date()): boolean {
-  return sameLocalDay(iso, now);
 }
 
 function byTime(a: Challenge, b: Challenge): number {

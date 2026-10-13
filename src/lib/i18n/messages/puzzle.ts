@@ -18,8 +18,27 @@ const en = {
   openLichess: "Open on Lichess",
   source: "Puzzle from the Lichess database",
   board: "Puzzle board",
-  pieces: { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" },
-  colors: { w: "white", b: "black" },
+  /** Square labels for screen readers: "{square}, {piece}". Full names per colour (German adjectives decline). */
+  square: "{square}, {piece}",
+  squareEmpty: "{square}, empty",
+  hinted: "{label} (hint)",
+  pieces: {
+    w: { p: "white pawn", n: "white knight", b: "white bishop", r: "white rook", q: "white queen", k: "white king" },
+    b: { p: "black pawn", n: "black knight", b: "black bishop", r: "black rook", q: "black queen", k: "black king" },
+  },
+  boardKeys: "Arrow keys move between squares, Enter picks a piece or a target.",
+  /** Admin → Club tab: PuzzleAdminCard. Only who finished and how, no tries or hints. */
+  admin: {
+    title: "Daily puzzle",
+    hint: "Only members who entered their PIN see and solve it. The Hall of Fame shows days and streaks.",
+    today: "Today",
+    nobody: "Nobody has finished today's puzzle yet.",
+    solved: "solved",
+    shown: "saw the solution",
+    perDay: "Recent days",
+    none: "No puzzle has been finished yet.",
+    col: { day: "Day", solved: "Solved", shown: "Saw solution" },
+  },
 };
 
 const de: typeof en = {
@@ -41,8 +60,25 @@ const de: typeof en = {
   openLichess: "Auf Lichess öffnen",
   source: "Rätsel aus der Lichess-Datenbank",
   board: "Rätselbrett",
-  pieces: { p: "Bauer", n: "Springer", b: "Läufer", r: "Turm", q: "Dame", k: "König" },
-  colors: { w: "weiß", b: "schwarz" },
+  square: "{square}, {piece}",
+  squareEmpty: "{square}, leer",
+  hinted: "{label} (Tipp)",
+  pieces: {
+    w: { p: "weißer Bauer", n: "weißer Springer", b: "weißer Läufer", r: "weißer Turm", q: "weiße Dame", k: "weißer König" },
+    b: { p: "schwarzer Bauer", n: "schwarzer Springer", b: "schwarzer Läufer", r: "schwarzer Turm", q: "schwarze Dame", k: "schwarzer König" },
+  },
+  boardKeys: "Mit den Pfeiltasten von Feld zu Feld, Enter wählt eine Figur oder ein Zielfeld.",
+  admin: {
+    title: "Rätsel des Tages",
+    hint: "Nur Mitglieder, die ihre PIN eingegeben haben, sehen und lösen es. Die Ruhmeshalle zeigt Tage und Serien.",
+    today: "Heute",
+    nobody: "Heute hat noch niemand das Rätsel beendet.",
+    solved: "gelöst",
+    shown: "Lösung angesehen",
+    perDay: "Letzte Tage",
+    none: "Noch kein Rätsel beendet.",
+    col: { day: "Tag", solved: "Gelöst", shown: "Lösung angesehen" },
+  },
 };
 
 export const puzzle = { en, de };

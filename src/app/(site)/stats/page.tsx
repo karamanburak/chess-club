@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { nameOf } from "@/lib/score";
+import { Icon } from "@/components/icons";
+import { StatsTabs } from "@/components/StatsTabs";
 import { readDb } from "@/lib/db";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
@@ -24,6 +27,7 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
 
   return (
     <>
+      <StatsTabs active="club" />
       <PageHeader eyebrow={t.stats.eyebrow} title={t.stats.title} subtitle={<span>{fmt(t.stats.subtitle, { games: st.games, players: db.players.length })}</span>} />
 
       {st.games === 0 ? (
@@ -55,7 +59,7 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
               {st.mostActive ? (
                 <>
                   <span className="font-medium truncate">
-                    <PlayerLink id={st.mostActive.playerId} name={names.get(st.mostActive.playerId)?.name ?? "?"} avatar />
+                    <PlayerLink id={st.mostActive.playerId} name={nameOf(names, st.mostActive.playerId)} avatar />
                   </span>
                   <span className="text-xs text-muted">{plural(st.mostActive.games, t.common.gamesN)}</span>
                 </>
@@ -68,9 +72,11 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
               {st.longestWinStreak ? (
                 <>
                   <span className="font-medium truncate">
-                    <PlayerLink id={st.longestWinStreak.playerId} name={names.get(st.longestWinStreak.playerId)?.name ?? "?"} avatar />
+                    <PlayerLink id={st.longestWinStreak.playerId} name={nameOf(names, st.longestWinStreak.playerId)} avatar />
                   </span>
-                  <span className="text-xs text-muted">🔥 {fmt(t.stats.inARow, { n: st.longestWinStreak.length })}</span>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted">
+                    <Icon name="flame" className="h-3.5 w-3.5" /> {fmt(t.stats.inARow, { n: st.longestWinStreak.length })}
+                  </span>
                 </>
               ) : (
                 <span className="stat-value text-muted">–</span>
@@ -117,7 +123,7 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
                           <Rank n={i + 1} />
                         </td>
                         <td>
-                          <PlayerLink id={r.playerId} name={names.get(r.playerId)?.name ?? "?"} avatar className="font-medium" />
+                          <PlayerLink id={r.playerId} name={nameOf(names, r.playerId)} avatar className="font-medium" />
                         </td>
                         <td className="text-right font-mono text-accent">{r.points}</td>
                         <td className="text-right font-mono">{r.games}</td>
@@ -141,9 +147,9 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
                 <div className="flex items-end gap-1 h-28">
                   {st.gamesPerMonth.slice(-12).map((m) => (
                     <div key={m.month} className="flex-1 flex flex-col items-center gap-1 group" title={`${formatMonth(m.month, lang)}: ${plural(m.games, t.common.gamesN)}`}>
-                      <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 font-mono">{m.games}</span>
+                      <span className="text-xs text-muted opacity-0 group-hover:opacity-100 font-mono">{m.games}</span>
                       <div className="w-full rounded-t bg-accent/70 group-hover:bg-accent transition-colors" style={{ height: `${Math.max(4, (m.games / maxMonth) * 80)}px` }} />
-                      <span className="text-[10px] text-muted">{m.month.slice(5)}</span>
+                      <span className="text-xs text-muted">{m.month.slice(5)}</span>
                     </div>
                   ))}
                 </div>
@@ -155,9 +161,9 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
                     <div>
                       <dt className="text-xs uppercase tracking-wider text-muted">{t.stats.biggestUpset}</dt>
                       <dd className="mt-0.5">
-                        <PlayerLink id={st.biggestUpset.game.whiteId} name={names.get(st.biggestUpset.game.whiteId)?.name ?? "?"} />{" "}
+                        <PlayerLink id={st.biggestUpset.game.whiteId} name={nameOf(names, st.biggestUpset.game.whiteId)} />{" "}
                         <span className="font-mono text-xs px-1.5 rounded bg-panel-2 border border-line">{resultLabel(st.biggestUpset.game.result)}</span>{" "}
-                        <PlayerLink id={st.biggestUpset.game.blackId} name={names.get(st.biggestUpset.game.blackId)?.name ?? "?"} />
+                        <PlayerLink id={st.biggestUpset.game.blackId} name={nameOf(names, st.biggestUpset.game.blackId)} />
                         <span className="text-xs text-muted ml-2">
                           {fmt(t.stats.pointsLower, { n: st.biggestUpset.diff })} · {st.biggestUpset.game.completedAt && formatDate(st.biggestUpset.game.completedAt, lang)}
                         </span>
@@ -168,7 +174,7 @@ export default async function StatsPage({ searchParams }: PageProps<"/stats">) {
                     <div>
                       <dt className="text-xs uppercase tracking-wider text-muted">{t.stats.highestRating}</dt>
                       <dd className="mt-0.5">
-                        <PlayerLink id={st.highestRating.playerId} name={names.get(st.highestRating.playerId)?.name ?? "?"} />{" "}
+                        <PlayerLink id={st.highestRating.playerId} name={nameOf(names, st.highestRating.playerId)} />{" "}
                         <span className="font-mono text-accent">{st.highestRating.rating}</span>
                         <span className="text-xs text-muted ml-2">{formatDate(st.highestRating.date, lang)}</span>
                       </dd>

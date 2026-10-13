@@ -30,7 +30,10 @@ const en = {
     win: "win",
     loss: "loss",
     draw: "draw",
+    peak: "peak {rating}",
   },
+  /** StatsTabs: the tab bar shared by /stats, /hall-of-fame and /h2h. */
+  tabs: { label: "Stats sections", club: "Club stats", hall: "Hall of Fame", h2h: "Head-to-head" },
 };
 const de: typeof en = {
   eyebrow: "Zahlen",
@@ -63,6 +66,9 @@ const de: typeof en = {
     win: "Sieg",
     loss: "Niederlage",
     draw: "Remis",
+    peak: "Bestwert {rating}",
   },
+  /** StatsTabs: the tab bar shared by /stats, /hall-of-fame and /h2h. */
+  tabs: { label: "Statistik-Bereiche", club: "Vereinsstatistik", hall: "Ruhmeshalle", h2h: "Direktvergleich" },
 };
 export const stats = { en, de };

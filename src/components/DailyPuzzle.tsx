@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { recordPuzzle } from "@/lib/actions";
 import { isPromotion, parseFen, playUci, squareName, type Position } from "@/lib/board";
 import { fmt, plural } from "@/lib/i18n";
 import type { Puzzle } from "@/lib/puzzles";
 import { PieceSvg } from "./PieceSvg";
+import { Icon } from "./icons";
 import { useT } from "./I18nProvider";
 
 type Status = "play" | "good" | "wrong" | "solved" | "shown";
@@ -51,6 +52,10 @@ export function DailyPuzzle({
   const [hint, setHint] = useState<string | null>(null);
   const [hinted, setHinted] = useState(false);
   const busy = useRef(false);
+  /** The board's single tab stop, moved with the arrow keys. */
+  const [cursor, setCursor] = useState<string | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const keysId = useId();
   /** The solver's own moves so far, sent with a "solved" so the server can check them. */
   const mine = useRef<string[]>([]);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -201,6 +206,21 @@ export function DailyPuzzle({
 
   // The solver's side sits at the bottom.
   const order = side === "w" ? [...Array(64).keys()] : [...Array(64).keys()].reverse();
+  const rows = Array.from({ length: 8 }, (_, r) => order.slice(r * 8, r * 8 + 8));
+  // One tab stop for the whole board (roving tabindex): the square last visited, else the selection, else the first own piece.
+  const focusSq = cursor ?? selected ?? squareName(order.find((i) => pos.squares[i]?.color === side) ?? order[0]);
+  const onBoardKey = (e: KeyboardEvent<HTMLButtonElement>, r: number, c: number) => {
+    const moves: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    let to: [number, number] | null = null;
+    if (e.key in moves) to = [Math.min(7, Math.max(0, r + moves[e.key][0])), Math.min(7, Math.max(0, c + moves[e.key][1]))];
+    else if (e.key === "Home") to = [e.ctrlKey ? 0 : r, 0];
+    else if (e.key === "End") to = [e.ctrlKey ? 7 : r, 7];
+    if (!to) return;
+    e.preventDefault();
+    const sq = squareName(rows[to[0]][to[1]]);
+    setCursor(sq);
+    boardRef.current?.querySelector<HTMLButtonElement>(`[data-sq="${sq}"]`)?.focus();
+  };
   const lastFrom = last?.slice(0, 2);
   const lastTo = last?.slice(2, 4);
   const message =
@@ -224,37 +244,56 @@ export function DailyPuzzle({
         </span>
         <span className="text-xs text-muted font-mono">{fmt(m.rating, { n: puzzle.rating })}</span>
       </div>
-      <div role="grid" aria-label={m.board} className="grid grid-cols-8 aspect-square w-full max-w-[22rem] mx-auto overflow-hidden rounded-lg border border-line select-none">
-        {order.map((i) => {
-          const sq = squareName(i);
-          const piece = pos.squares[i];
-          const dark = (Math.floor(i / 8) + (i % 8)) % 2 === 1;
-          const isLast = sq === lastFrom || sq === lastTo;
-          const isSel = sq === selected;
-          const row = order.indexOf(i);
-          const label = (piece ? `${sq}, ${m.colors[piece.color]} ${m.pieces[piece.type]}` : sq) + (sq === hint ? ` (${m.hint})` : "");
-          return (
-            <button
-              key={sq}
-              type="button"
-              role="gridcell"
-              aria-label={label}
-              aria-selected={isSel}
-              onClick={() => onSquare(sq, i)}
-              className={`relative aspect-square ${dark ? "bg-[var(--sq-dark)]" : "bg-[var(--sq-light)]"} ${done ? "cursor-default" : "cursor-pointer"} focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2`}
-            >
-              {isLast && <span className="absolute inset-0 bg-accent/35" aria-hidden />}
-              {isSel && <span className="absolute inset-0 ring-4 ring-inset ring-accent" aria-hidden />}
-              {sq === hint && !isSel && <span className="absolute inset-0 ring-4 ring-inset ring-win/80 bg-win/20 animate-pulse" aria-hidden />}
-              {status === "wrong" && isLast === false && sq === selected && <span className="absolute inset-0 bg-loss/30" aria-hidden />}
-              {piece && <PieceSvg piece={piece} className="relative h-full w-full p-[6%]" />}
-              {/* Coordinates along the solver's bottom edge and left edge, as on a printed diagram. */}
-              {row % 8 === 0 && <span className={`absolute left-0.5 top-0 text-[9px] font-medium leading-none ${dark ? "text-[var(--sq-light)]" : "text-[var(--sq-dark)]"}`} aria-hidden>{sq[1]}</span>}
-              {row >= 56 && <span className={`absolute right-0.5 bottom-0 text-[9px] font-medium leading-none ${dark ? "text-[var(--sq-light)]" : "text-[var(--sq-dark)]"}`} aria-hidden>{sq[0]}</span>}
-            </button>
-          );
-        })}
+      <div
+        ref={boardRef}
+        role="grid"
+        aria-label={m.board}
+        aria-describedby={keysId}
+        className="flex flex-col aspect-square w-full max-w-[22rem] mx-auto overflow-hidden rounded-lg border border-line select-none"
+      >
+        {rows.map((cells, r) => (
+          <div key={r} role="row" className="grid grid-cols-8 flex-1">
+            {cells.map((i, c) => {
+              const sq = squareName(i);
+              const piece = pos.squares[i];
+              const dark = (Math.floor(i / 8) + (i % 8)) % 2 === 1;
+              const isLast = sq === lastFrom || sq === lastTo;
+              const isSel = sq === selected;
+              const base = piece ? fmt(m.square, { square: sq, piece: m.pieces[piece.color][piece.type] }) : fmt(m.squareEmpty, { square: sq });
+              const label = sq === hint ? fmt(m.hinted, { label: base }) : base;
+              return (
+                <div key={sq} role="gridcell" aria-selected={isSel} className={`relative ${dark ? "bg-[var(--sq-dark)]" : "bg-[var(--sq-light)]"}`}>
+                  <button
+                    type="button"
+                    data-sq={sq}
+                    tabIndex={sq === focusSq ? 0 : -1}
+                    aria-label={label}
+                    onClick={() => {
+                      setCursor(sq);
+                      onSquare(sq, i);
+                    }}
+                    onFocus={() => setCursor(sq)}
+                    onKeyDown={(e) => onBoardKey(e, r, c)}
+                    className={`absolute inset-0 ${done ? "cursor-default" : "cursor-pointer"} focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2`}
+                  >
+                    {isLast && <span className="absolute inset-0 bg-accent/35" aria-hidden />}
+                    {isSel && <span className="absolute inset-0 ring-4 ring-inset ring-accent" aria-hidden />}
+                    {sq === hint && !isSel && <span className="absolute inset-0 ring-4 ring-inset ring-win/80 bg-win/20 animate-pulse" aria-hidden />}
+                    {status === "wrong" && isLast === false && sq === selected && <span className="absolute inset-0 bg-loss/30" aria-hidden />}
+                    {piece && <PieceSvg piece={piece} className="relative h-full w-full p-[6%]" />}
+                    {/* Coordinates along the solver's bottom edge and left edge, as on a printed diagram. */}
+                    {c === 0 && <span className={`absolute left-0.5 top-0 text-xs font-semibold leading-none ${dark ? "text-[var(--sq-light)]" : "text-[var(--sq-dark)]"}`} aria-hidden>{sq[1]}</span>}
+                    {r === 7 && <span className={`absolute right-0.5 bottom-0 text-xs font-semibold leading-none ${dark ? "text-[var(--sq-light)]" : "text-[var(--sq-dark)]"}`} aria-hidden>{sq[0]}</span>}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
+      <p id={keysId} className="sr-only">
+        {m.boardKeys}
+      </p>
       <p role="status" aria-live="polite" className={`text-sm ${status === "wrong" ? "text-loss" : status === "solved" ? "text-win" : "text-muted"}`}>
         {message}
       </p>
@@ -274,8 +313,9 @@ export function DailyPuzzle({
             {m.startOver}
           </button>
         )}
-        <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-muted hover:text-accent" title={m.source}>
-          {m.openLichess} →
+        <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-muted hover:text-accent" title={m.source}>
+          {m.openLichess}
+          <Icon name="arrow-right" className="h-3.5 w-3.5" />
         </a>
       </div>
     </div>

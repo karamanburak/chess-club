@@ -189,3 +189,54 @@ describe("syncKnockout", () => {
     expect(other.gameIds.length).toBe(2);
   });
 });
+
+describe("syncKnockout: corrections and double withdrawals", () => {
+  test("correcting a drawn base game to a win removes the unplayed tiebreak and crowns the winner", () => {
+    const { d, t } = setup(4);
+    generateKnockoutRound(d, t);
+    const first = d.games.find((g) => g.round === 1)!;
+    const m = t.knockout!.matches.find((x) => x.gameIds.includes(first.id))!;
+    first.result = "1/2-1/2";
+    first.completedAt = "2026-02-01T12:00:00.000Z";
+    syncKnockout(d, t);
+    expect(m.gameIds.length).toBe(2);
+    const tiebreakId = m.gameIds[1];
+    first.result = "1-0";
+    syncKnockout(d, t);
+    expect(m.gameIds).toEqual([first.id]);
+    expect(m.winnerId).toBe(first.whiteId);
+    expect(d.games.some((g) => g.id === tiebreakId)).toBe(false);
+    expect(t.rounds[0].pairings.some((p) => p.gameId === tiebreakId)).toBe(false);
+    expect(roundComplete(d, t, 1)).toBe(false); // the other semifinal is still open
+  });
+
+  test("a still-tied match keeps exactly one unplayed tiebreak across repeated syncs", () => {
+    const { d, t } = setup(4);
+    generateKnockoutRound(d, t);
+    const first = d.games.find((g) => g.round === 1)!;
+    const m = t.knockout!.matches.find((x) => x.gameIds.includes(first.id))!;
+    first.result = "1/2-1/2";
+    first.completedAt = "x";
+    syncKnockout(d, t);
+    syncKnockout(d, t);
+    expect(m.gameIds.length).toBe(2);
+    expect(m.winnerId).toBeNull();
+  });
+
+  test("when both players of a match withdraw, the better seed goes through and the open games go", () => {
+    const { d, t } = setup(4);
+    generateKnockoutRound(d, t);
+    const m = t.knockout!.matches.find((x) => x.a === "p1" || x.b === "p1")!; // p1 (seed 1) v p4 (seed 4)
+    t.withdrawnIds = ["p1", "p4"];
+    syncKnockout(d, t);
+    expect(m.winnerId).toBe("p1");
+    expect(m.gameIds).toEqual([]);
+    play(d, t, 1, higherSeedWins);
+    expect(roundComplete(d, t, 1)).toBe(true);
+    generateKnockoutRound(d, t);
+    // The withdrawn p1 then hands the final to p2.
+    syncKnockout(d, t);
+    const final = t.knockout!.matches.find((x) => x.round === 2 && !x.thirdPlace)!;
+    expect(final.winnerId).toBe("p2");
+  });
+});

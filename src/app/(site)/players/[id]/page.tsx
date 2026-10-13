@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { nameOf } from "@/lib/score";
 import { localDay } from "@/lib/time";
 import { Icon } from "@/components/icons";
 import Link from "next/link";
@@ -17,6 +18,8 @@ import { colorStats, formatDateTime, gamesForPlayer, playerMap, rankChanges, rat
 import { isForfeit, scoreFor } from "@/lib/elo";
 import { RatingChart } from "@/components/RatingChart";
 import { SubmitButton } from "@/components/SubmitButton";
+import { PushToggle } from "@/components/PushToggle";
+import { pushKeys } from "@/lib/push";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { AchievementChip, ColorDot, Empty, FormDots, PageHeader, PlayerLink, Provisional, RankMove, RatingDelta, Section, StreakBadge, TitleBadge } from "@/components/ui";
 
@@ -32,6 +35,9 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
   if (!player) notFound();
   const me = await currentPlayerId();
   const isMe = me === player.id;
+  // Web Push needs the server's keys and the Admin switch on; only the public key goes to the browser.
+  const keys = pushKeys();
+  const push = keys && !db.settings.pushOff ? { publicKey: keys.publicKey } : null;
 
   const names = playerMap(db);
   const games = gamesForPlayer(db, player.id);
@@ -88,7 +94,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
         actions={
           rv[0] ? (
             <Link href={`/h2h?a=${player.id}&b=${rv[0].opponentId}`} className="btn">
-              <Icon name="swords" className="h-4 w-4" /> {fmt(p.vs, { name: names.get(rv[0].opponentId)?.name })}
+              <Icon name="swords" className="h-4 w-4" /> {fmt(p.vs, { name: nameOf(names, rv[0].opponentId) })}
             </Link>
           ) : undefined
         }
@@ -132,7 +138,10 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
             <FormDots results={recentForm(db, player.id, 8)} />
           </span>
           <span className="text-xs text-muted flex items-center gap-2 flex-wrap">
-            <span title={p.longestWinStreak}>🔥 {st.longestWin}</span>
+            <span title={p.longestWinStreak} className="inline-flex items-center gap-1">
+              <Icon name="flame" className="h-3.5 w-3.5" />
+              <span className="sr-only">{p.longestWinStreak}:</span> {st.longestWin}
+            </span>
             <span className="flex items-center gap-1" title={p.scoreWithColors}>
               <ColorDot color="white" /> {whitePct === null ? "–" : `${whitePct}%`} <ColorDot color="black" /> {blackPct === null ? "–" : `${blackPct}%`}
             </span>
@@ -168,7 +177,9 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                   <thead>
                     <tr>
                       <th>{p.date}</th>
-                      <th></th>
+                      <th className="hidden sm:table-cell">
+                        <span className="sr-only">{msg.common.color}</span>
+                      </th>
                       <th>{p.opponent}</th>
                       <th>{msg.common.result}</th>
                       <th className="text-right">{msg.common.elo}</th>
@@ -185,15 +196,21 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                       const s = g.sessionId ? sessions.get(g.sessionId) : null;
                       return (
                         <tr key={g.id} className="hover:bg-panel-2/50">
-                          <td className="text-muted text-xs whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
-                          <td>
+                          {/* On a phone the date may wrap and the colour moves next to the name, so the Elo column stays on screen. */}
+                          <td className="text-muted text-xs sm:whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
+                          <td className="hidden sm:table-cell">
                             <ColorDot color={isWhite ? "white" : "black"} />
                           </td>
                           <td>
-                            <PlayerLink id={oppId} name={names.get(oppId)?.name ?? "?"} rating={isWhite ? g.blackRatingBefore : g.whiteRatingBefore} />
+                            <span className="flex items-center gap-1.5">
+                              <span className="sm:hidden inline-flex">
+                                <ColorDot color={isWhite ? "white" : "black"} />
+                              </span>
+                              <PlayerLink id={oppId} name={nameOf(names, oppId)} rating={isWhite ? g.blackRatingBefore : g.whiteRatingBefore} />
+                            </span>
                           </td>
                           <td className={`font-mono font-medium ${scoreColor}`}>{resultLabel(g.result)}</td>
-                          <td className="text-right font-mono">
+                          <td className="text-right font-mono whitespace-nowrap">
                             {isWhite ? g.whiteRatingAfter : g.blackRatingAfter}{" "}
                             <RatingDelta before={isWhite ? g.whiteRatingBefore : g.blackRatingBefore} after={isWhite ? g.whiteRatingAfter : g.blackRatingAfter} />
                           </td>
@@ -285,22 +302,24 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                     <th>{p.opponent}</th>
                     <th className="text-right">{msg.common.games}</th>
                     <th className="text-right">{msg.common.wdl}</th>
-                    <th></th>
+                    <th>
+                      <span className="sr-only">{msg.home.headToHead}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {rv.slice(0, 10).map((r) => (
                     <tr key={r.opponentId} className="hover:bg-panel-2/50">
                       <td>
-                        <PlayerLink id={r.opponentId} name={names.get(r.opponentId)?.name ?? "?"} avatar />
+                        <PlayerLink id={r.opponentId} name={nameOf(names, r.opponentId)} avatar />
                       </td>
                       <td className="text-right font-mono">{r.games}</td>
                       <td className="text-right font-mono text-xs nowrap">
                         <span className="text-win">{r.wins}</span> / <span className="text-draw">{r.draws}</span> / <span className="text-loss">{r.losses}</span>
                       </td>
                       <td className="text-right">
-                        <Link href={`/h2h?a=${player.id}&b=${r.opponentId}`} className="btn btn-sm btn-ghost">
-                          ⚔
+                        <Link href={`/h2h?a=${player.id}&b=${r.opponentId}`} className="btn btn-sm btn-ghost" title={msg.home.headToHead} aria-label={`${msg.home.headToHead}: ${nameOf(names, r.opponentId)}`}>
+                          <Icon name="swords" className="h-4 w-4" />
                         </Link>
                       </td>
                     </tr>
@@ -310,6 +329,12 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
             )}
           </Section>
 
+          {isMe && push && (
+            <Section title={msg.players.push.title}>
+              <PushToggle publicKey={push.publicKey} />
+            </Section>
+          )}
+
           {isMe && (
             <Section title={p.yourPin}>
               <form action={changeOwnPin} className="flex flex-col gap-3">
@@ -317,16 +342,16 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                 <p className="text-xs text-muted -mt-1">{p.pinHint}</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label htmlFor="f-current" className="label">{p.current}</label>
-                    <input id="f-current" name="current" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required={!!player.pinHash} className="w-full font-mono text-center tracking-widest" autoComplete="off" />
+                    <label htmlFor="f-pin-current" className="label">{p.current}</label>
+                    <input id="f-pin-current" name="current" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required={!!player.pinHash} className="w-full font-mono text-center tracking-widest" autoComplete="off" />
                   </div>
                   <div>
-                    <label htmlFor="f-new" className="label">{p.new}</label>
-                    <input id="f-new" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
+                    <label htmlFor="f-pin-new" className="label">{p.new}</label>
+                    <input id="f-pin-new" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
                   </div>
                   <div>
-                    <label htmlFor="f-repeat" className="label">{p.repeat}</label>
-                    <input id="f-repeat" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
+                    <label htmlFor="f-pin-repeat" className="label">{p.repeat}</label>
+                    <input id="f-pin-repeat" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required className="w-full font-mono text-center tracking-widest" autoComplete="off" />
                   </div>
                 </div>
                 <SubmitButton className="btn" pendingText={msg.common.saving}>
@@ -348,16 +373,16 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
               <Section title={p.editPlayer}>
                 <form action={updatePlayer.bind(null, player.id)} className="flex flex-col gap-3">
                   <div>
-                    <label htmlFor="f-name" className="label">{p.name}</label>
-                    <input id="f-name" name="name" defaultValue={player.name} required className="w-full" />
+                    <label htmlFor="f-player-name" className="label">{p.name}</label>
+                    <input id="f-player-name" name="name" defaultValue={player.name} required className="w-full" />
                   </div>
                   <div>
-                    <label htmlFor="f-note" className="label">{p.note}</label>
-                    <input id="f-note" name="note" defaultValue={player.note ?? ""} className="w-full" placeholder={p.notePlaceholder} />
+                    <label htmlFor="f-player-note" className="label">{p.note}</label>
+                    <input id="f-player-note" name="note" defaultValue={player.note ?? ""} className="w-full" placeholder={p.notePlaceholder} />
                   </div>
                   <div>
-                    <label htmlFor="f-startingElo" className="label">{p.startingElo}</label>
-                    <input id="f-startingElo" name="initialRating" type="number" defaultValue={player.initialRating} min={100} max={3000} className="w-full" />
+                    <label htmlFor="f-player-startingElo" className="label">{p.startingElo}</label>
+                    <input id="f-player-startingElo" name="initialRating" type="number" defaultValue={player.initialRating} min={100} max={3000} className="w-full" />
                     <p className="text-xs text-muted mt-1.5">{p.startingEloHint}</p>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
@@ -375,8 +400,8 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                   </p>
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
-                      <label htmlFor="f-newPinOptional" className="label">{p.newPinOptional}</label>
-                      <input id="f-newPinOptional" name="pin" type="text" inputMode="numeric" pattern="\d{4}" maxLength={4} className="w-full font-mono tracking-widest" autoComplete="off" placeholder={p.pinPlaceholder} />
+                      <label htmlFor="f-player-newPin" className="label">{p.newPinOptional}</label>
+                      <input id="f-player-newPin" name="pin" type="text" inputMode="numeric" pattern="\d{4}" maxLength={4} className="w-full font-mono tracking-widest" autoComplete="off" placeholder={p.pinPlaceholder} />
                     </div>
                     <SubmitButton className="btn" pendingText={msg.common.saving}>
                       {player.pinHash ? p.resetPin : p.setPin}

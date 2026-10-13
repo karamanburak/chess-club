@@ -8,6 +8,7 @@ process.env.CHESS_DATA_DIR = dir;
 // Imported after the env var is set so DATA_DIR points at the temp folder.
 const dbModule = await import("../db");
 const { BACKUP_DIR, migrate, mutate, pruneBackups, readDb } = dbModule;
+const { localDay } = await import("../time");
 
 beforeAll(() => fs.mkdirSync(BACKUP_DIR, { recursive: true }));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -71,6 +72,13 @@ describe("migrate", () => {
     ]);
   });
 
+  test("drops the retired owner password and its lock", () => {
+    const db = migrate({ players: [], games: [], tournaments: [], settings: { adminPasswordHash: "a", ownerPasswordHash: "o", ownerLock: { fails: 2 } } });
+    expect(db.settings).not.toHaveProperty("ownerPasswordHash");
+    expect(db.settings).not.toHaveProperty("ownerLock");
+    expect(db.settings.adminPasswordHash).toBe("a");
+  });
+
   test("turns a v1 quickSession into a club night with one round", () => {
     const db = migrate({
       players: [],
@@ -84,6 +92,36 @@ describe("migrate", () => {
     expect(s.rounds[0].pairings[0]).toMatchObject({ board: 1, gameId: "g1" });
     expect(db.games[0].sessionId).toBe(s.id);
     expect("quickSession" in db).toBe(false);
+  });
+
+  test("ids made up by a migration are the same on every read, so links work before the first save", () => {
+    const raw = () => ({
+      players: [],
+      games: [{ id: "g1", seq: 1, whiteId: "a", blackId: "b", result: null, rated: true, createdAt: "x", completedAt: null }],
+      tournaments: [],
+      quickSession: { createdAt: "2026-01-05T18:00:00.000Z", byePlayerId: null, pairings: [{ whiteId: "a", blackId: "b", gameId: "g1" }] },
+    });
+    const one = migrate(raw());
+    const two = migrate(raw());
+    expect(one.sessions[0].id).toBe(two.sessions[0].id);
+    expect(one.seasons[0].id).toBe(two.seasons[0].id);
+  });
+
+  test("players from before the rated-game count get it from a replay", () => {
+    const p = (id: string) => ({ id, name: id, initialRating: 1500, rating: 1500, gamesPlayed: 0, wins: 0, draws: 0, losses: 0, active: true, createdAt: "2026-01-01" });
+    const g = (id: string, rated: boolean) => ({ id, seq: Number(id.slice(1)), whiteId: "a", blackId: "b", result: "1-0", rated, createdAt: "2026-01-02T10:00:00.000Z", completedAt: "2026-01-02T10:00:00.000Z" });
+    const db = migrate({ players: [p("a"), p("b")], games: [g("g1", false), g("g2", true)], tournaments: [] });
+    const a = db.players.find((x) => x.id === "a")!;
+    expect(a.ratedGames).toBe(1);
+    expect(a.gamesPlayed).toBe(2);
+    expect(a.rating).toBe(1520);
+  });
+
+  test("puzzle days older than the kept window are dropped", () => {
+    const solve = (day: string) => ({ day, playerId: "a", puzzleId: "p", result: "solved", misses: 0, hint: false, at: `${day}T10:00:00.000Z` });
+    const today = localDay();
+    const db = migrate({ players: [], games: [], tournaments: [], puzzleSolves: [solve("2000-01-01"), solve(today)] });
+    expect(db.puzzleSolves.map((s) => s.day)).toEqual([today]);
   });
 });
 

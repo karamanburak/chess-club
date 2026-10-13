@@ -3,6 +3,8 @@ import { dayOf, localDay } from "./time";
 import path from "node:path";
 import { cache } from "react";
 import { pickAvatar } from "./avatar";
+import { recomputeRatings } from "./elo";
+import { trimPuzzleSolves } from "./puzzle-stats";
 import type { ClubInfo, Database, TiebreakKey } from "./types";
 
 /**
@@ -48,6 +50,8 @@ export function migrate(raw: any): Database {
   delete db.settings.club.motto; // replaced by the quote of the day
   delete db.settings.club.founded; // removed field
   delete db.settings.memberNotifyOff; // members' own ntfy topics gave way to the club's Slack channel
+  delete db.settings.ownerPasswordHash; // the owner password is gone: the admin opens every tool
+  delete db.settings.ownerLock;
   db.version = 2;
 
   for (const g of db.games) {
@@ -70,14 +74,16 @@ export function migrate(raw: any): Database {
     c.rated ??= true; // challenges before the rated/unrated choice all counted for Elo
     if (c.session && c.timeControl) c.timeControl = ""; // sessions sent before they dropped the time control
   }
+  db.puzzleSolves = trimPuzzleSolves(db.puzzleSolves, localDay());
   // Every club lives in a season. The first one opens at the first game (or today) and is named after that year.
+  // Fixed id: until the first save every read migrates again, and links to the season must survive that.
   if (db.seasons.length === 0) {
     const first = db.games
       .map((g: any) => g.completedAt as string | null)
       .filter((x: string | null): x is string => !!x)
       .sort()[0];
     const start = first ? dayOf(first) : localDay();
-    db.seasons.push({ id: `season-${start}`, name: `Season ${start.slice(0, 4)}`, start, end: null, championId: null });
+    db.seasons.push({ id: "season-1", name: `Season ${start.slice(0, 4)}`, start, end: null, championId: null });
   }
   // Faces for players created before avatars existed: seeded by id, so every read agrees.
   for (const p of db.players) p.avatar ||= pickAvatar(p.id);
@@ -90,7 +96,8 @@ export function migrate(raw: any): Database {
       present.add(p.blackId);
     }
     if (qs.byePlayerId) present.add(qs.byePlayerId);
-    const id = crypto.randomUUID();
+    // Derived from the night's date, not random: every read migrates again until the first save.
+    const id = `v1-night-${String(qs.createdAt ?? "").replace(/[^0-9]/g, "") || "0"}`;
     db.sessions.push({
       id,
       createdAt: qs.createdAt,
@@ -111,6 +118,8 @@ export function migrate(raw: any): Database {
     for (const g of db.games) if (ids.has(g.id)) g.sessionId = id;
     delete db.quickSession;
   }
+  // Players from before the rated-game count (the K factor reads it): one replay fills it for everyone.
+  if (db.players.some((p: any) => typeof p.ratedGames !== "number")) recomputeRatings(db);
   return db as Database;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -299,7 +308,7 @@ const postgresStorage: Storage = {
   },
   async listBackups() {
     const q = await sql();
-    const rows = (await q`SELECT name, length(data::text) AS size, created_at FROM club_snapshots ORDER BY created_at DESC`) as { name: string; size: number; created_at: string }[];
+    const rows = (await q`SELECT name, pg_column_size(data) AS size, created_at FROM club_snapshots ORDER BY created_at DESC`) as { name: string; size: number; created_at: string }[];
     return rows.map((r) => ({ file: r.name, size: Number(r.size), date: new Date(r.created_at).toISOString() }));
   },
   async readBackup(file) {

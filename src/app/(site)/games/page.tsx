@@ -1,252 +1,151 @@
 import Link from "next/link";
-import { Suspense } from "react";
+import { flippedResultLabel } from "@/lib/score";
 import { readDb } from "@/lib/db";
-import { isAdmin } from "@/lib/auth";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
-import { deleteGame } from "@/lib/actions";
-import { completedGames, formatDateTime, formatMonth, monthsWithGames, playerMap, resultLabel } from "@/lib/queries";
-import { ConfirmButton } from "@/components/ConfirmButton";
-import { ResultButtons } from "@/components/ResultButtons";
-import { MonthSelect } from "@/components/MonthSelect";
-import { SearchBox } from "@/components/SearchBox";
-import { Empty, PageHeader, PlayerLink, RatingDelta, Section } from "@/components/ui";
-import { localMonth } from "@/lib/time";
+import { formatDateTime, headToHead, leaderboard, playerMap, resultLabel } from "@/lib/queries";
+import { StatsTabs } from "@/components/StatsTabs";
+import { Avatar, ColorDot, Empty, PageHeader, PlayerLink, Section } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
-const PAGE = 50;
-/** Recent months shown as buttons; older ones go into one dropdown, so the row never grows. */
-const MONTH_CHIPS = 3;
 
-export default async function GamesPage({ searchParams }: PageProps<"/games">) {
+export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
   const sp = await searchParams;
   const { t, lang } = await getT();
   const db = await readDb();
-  const admin = await isAdmin();
   const names = playerMap(db);
-  const tournaments = new Map(db.tournaments.map((t) => [t.id, t]));
-  const q = (typeof sp.q === "string" ? sp.q : "").toLowerCase();
-  const kind = typeof sp.kind === "string" ? sp.kind : "all";
-  const month = typeof sp.month === "string" ? sp.month : "";
-  const page = Math.max(1, Number(sp.page) || 1);
-
-  let games = completedGames(db);
-  if (q) games = games.filter((g) => [g.whiteId, g.blackId].some((id) => (names.get(id)?.name ?? "").toLowerCase().includes(q)));
-  if (kind === "tournament") games = games.filter((g) => g.tournamentId);
-  if (kind === "night") games = games.filter((g) => g.sessionId);
-  if (kind === "friendly") games = games.filter((g) => !g.tournamentId && !g.sessionId);
-  // Months in club time: a game finished at 00:30 on 1 October (Berlin) belongs to October, not to September in UTC.
-  if (month) games = games.filter((g) => !!g.completedAt && localMonth(new Date(g.completedAt)) === month);
-  const total = games.length;
-  const pages = Math.max(1, Math.ceil(total / PAGE));
-  games = games.slice((page - 1) * PAGE, page * PAGE);
-
-  const months = monthsWithGames(db);
-  const monthLabel = (m: string) => `${formatMonth(m, lang).slice(0, 3)} ${m.slice(0, 4)}`;
-
-  const link = (over: Record<string, string | number | undefined>) => {
-    const p = new URLSearchParams();
-    const all = { q, kind, month, page: 1, ...over };
-    for (const [k, v] of Object.entries(all)) if (v && String(v) !== "all" && !(k === "page" && v === 1)) p.set(k, String(v));
-    const s = p.toString();
-    return s ? `/games?${s}` : "/games";
-  };
-
-  /** What both layouts need per game: names, who won, and the event cell. */
-  const row = (g: (typeof games)[number]) => {
-    const tr = g.tournamentId ? tournaments.get(g.tournamentId) : null;
-    return {
-      tr,
-      /** The admin corrects friendlies here; tournament and club-night boards have their own pages. */
-      fix: admin && !g.tournamentId && !g.sessionId,
-      ww: g.result === "1-0" || g.result === "+/-",
-      bw: g.result === "0-1" || g.result === "-/+",
-      wn: names.get(g.whiteId)?.name ?? "?",
-      bn: names.get(g.blackId)?.name ?? "?",
-      event: (
-        <>
-          {tr ? (
-            <Link href={`/tournaments/${tr.id}`} className="hover:text-accent">
-              {tr.name} · {fmt(t.games.roundShort, { n: g.round })}
-            </Link>
-          ) : g.sessionId ? (
-            <Link href={`/pairing/${g.sessionId}`} className="hover:text-accent">
-              {t.common.clubNight}
-            </Link>
-          ) : (
-            t.games.friendly
-          )}
-          {!g.rated && <span className="ml-1 badge border-muted/40">{t.common.unrated}</span>}
-        </>
-      ),
-    };
-  };
+  const players = leaderboard(db, true);
+  const a = typeof sp.a === "string" && names.has(sp.a) ? sp.a : players[0]?.id;
+  const b = typeof sp.b === "string" && names.has(sp.b) && sp.b !== a ? sp.b : players.find((p) => p.id !== a)?.id;
+  const h = a && b ? headToHead(db, a, b) : null;
+  const pa = a ? names.get(a) : undefined;
+  const pb = b ? names.get(b) : undefined;
+  const total = h ? h.games.length : 0;
+  const w = (n: number) => (total ? `${(n / total) * 100}%` : "0%");
 
   return (
     <>
-      <PageHeader
-        eyebrow={t.games.eyebrow}
-        title={t.games.title}
-        subtitle={<span>{plural(total, q || kind !== "all" || month ? t.games.countMatch : t.games.countAll)}</span>}
-        actions={
-          <Suspense>
-            <SearchBox placeholder={t.games.searchPlaceholder} />
-          </Suspense>
-        }
-      />
-      <div className="flex flex-wrap items-center gap-2 mb-4 no-print">
-        {[
-          ["all", t.games.filterAll],
-          ["night", t.games.filterNights],
-          ["tournament", t.games.filterTournaments],
-          ["friendly", t.games.filterFriendlies],
-        ].map(([k, l]) => (
-          <Link key={k} href={link({ kind: k })} className={`btn btn-sm ${kind === k ? "btn-primary" : ""}`}>
-            {l}
-          </Link>
-        ))}
-        {/* One month only: the filter would repeat "All", so it stays away until there is a second month. */}
-        {(months.length > 1 || month) && (
-          <>
-            <span className="mx-1 text-line">|</span>
-            <Link href={link({ month: "" })} className={`btn btn-sm ${!month ? "btn-primary" : ""}`}>
-              {t.games.anyMonth}
-            </Link>
-            {months.slice(0, MONTH_CHIPS).map((m) => (
-              <Link key={m} href={link({ month: m })} className={`btn btn-sm ${month === m ? "btn-primary" : ""}`}>
-                {monthLabel(m)}
-              </Link>
+      <StatsTabs active="h2h" />
+      <PageHeader eyebrow={t.players.h2h.eyebrow} title={t.players.h2h.title} subtitle={<span>{t.players.h2h.subtitle}</span>} />
+
+      <form method="get" className="card flex flex-wrap items-end gap-3 mb-6">
+        <div className="flex-1 min-w-40">
+          <label htmlFor="f-players-h2h-playerA" className="label">{t.players.h2h.playerA}</label>
+          <select id="f-players-h2h-playerA" name="a" defaultValue={a} className="w-full">
+            {players.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.rating})
+              </option>
             ))}
-            {months.length > MONTH_CHIPS && (
-              <MonthSelect
-                options={months.slice(MONTH_CHIPS).map((m) => ({ value: m, label: monthLabel(m), href: link({ month: m }) }))}
-                value={month}
-                label={t.games.earlierMonths}
-                placeholder={t.games.earlierMonths}
-              />
+          </select>
+        </div>
+        <span className="text-muted pb-2">{t.players.h2h.vs}</span>
+        <div className="flex-1 min-w-40">
+          <label htmlFor="f-players-h2h-playerB" className="label">{t.players.h2h.playerB}</label>
+          <select id="f-players-h2h-playerB" name="b" defaultValue={b} className="w-full">
+            {players.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.rating})
+              </option>
+            ))}
+          </select>
+        </div>
+        <button className="btn btn-primary">{t.players.h2h.compare}</button>
+      </form>
+
+      {!h || !pa || !pb ? (
+        <div className="card">
+          <Empty icon="swords" title={t.players.h2h.needTwo} />
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
+          <Section title={t.players.h2h.record}>
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div className="flex flex-col items-center gap-2 flex-1">
+                <Avatar id={pa.id} name={pa.name} size="lg" />
+                <PlayerLink id={pa.id} name={pa.name} className="font-semibold" />
+                <span className="font-mono text-accent">{pa.rating}</span>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-semibold font-mono tracking-tight">
+                  <span className="text-win">{h.aWins}</span>
+                  <span className="text-muted text-2xl mx-1">–</span>
+                  <span className="text-draw">{h.draws}</span>
+                  <span className="text-muted text-2xl mx-1">–</span>
+                  <span className="text-loss">{h.bWins}</span>
+                </div>
+                <div className="text-xs text-muted mt-1">
+                  {plural(total, t.common.gamesN)} · {h.aPoints} : {h.bPoints}
+                </div>
+              </div>
+              <div className="flex flex-col items-center gap-2 flex-1">
+                <Avatar id={pb.id} name={pb.name} size="lg" />
+                <PlayerLink id={pb.id} name={pb.name} className="font-semibold" />
+                <span className="font-mono text-accent">{pb.rating}</span>
+              </div>
+            </div>
+            {total > 0 && (
+              <div className="flex h-2 rounded-full overflow-hidden">
+                <div className="bg-win" style={{ width: w(h.aWins) }} />
+                <div className="bg-draw" style={{ width: w(h.draws) }} />
+                <div className="bg-loss" style={{ width: w(h.bWins) }} />
+              </div>
             )}
-          </>
-        )}
-      </div>
+            <div className="mt-4 text-sm text-muted">
+              {total === 0
+                ? t.players.h2h.notPlayed
+                : h.aWins === h.bWins
+                  ? t.players.h2h.deadEven
+                  : fmt(t.players.h2h.leadsBy, { name: h.aWins > h.bWins ? pa.name : pb.name, n: Math.abs(h.aWins - h.bWins) })}{" "}
+              {t.players.h2h.ratingGap} <span className="font-mono">{Math.abs(pa.rating - pb.rating)}</span>.
+            </div>
+          </Section>
 
-      <Section title={t.games.results} flush right={pages > 1 ? <Pager page={page} pages={pages} link={link} labels={{ prev: t.games.prevPage, next: t.games.nextPage }} /> : undefined}>
-        {games.length === 0 ? (
-          <Empty icon="list" title={t.games.noGames}>{t.games.noMatch}</Empty>
-        ) : (
-          <>
-            {/* Phone: one card per game, no horizontal scrolling. */}
-            <ul className="sm:hidden divide-y divide-line/60">
-              {games.map((g) => {
-                const r = row(g);
-                return (
-                  <li key={g.id} className="px-4 py-3 flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between gap-2 text-xs text-muted">
-                      <span className="whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
-                      <span className="truncate">{r.event}</span>
-                    </div>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                      <span className={`flex items-center justify-end gap-1.5 min-w-0 text-right ${r.ww ? "font-semibold" : r.bw ? "text-muted" : ""}`}>
-                        <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} />
-                        <PlayerLink id={g.whiteId} name={r.wn} className="truncate" />
-                      </span>
-                      {r.fix ? (
-                        <ResultButtons gameId={g.id} current={g.result} names={{ white: r.wn, black: r.bn }} allowClear={false} />
-                      ) : (
-                        <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
-                      )}
-                      <span className={`flex items-center gap-1.5 min-w-0 ${r.bw ? "font-semibold" : r.ww ? "text-muted" : ""}`}>
-                        <PlayerLink id={g.blackId} name={r.bn} className="truncate" />
-                        <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} />
-                      </span>
-                    </div>
-                    {admin && !r.tr && (
-                      <div className="flex justify-end">
-                        <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel={t.common.delete}>
-                          {t.common.delete}
-                        </ConfirmButton>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-
-            {/* Tablet and up: the table. */}
-            <div className="hidden sm:block scroll-x">
+          <Section title={t.players.h2h.gamesBetween} flush>
+            {h.games.length === 0 ? (
+              <Empty icon="pawn" title={t.players.h2h.noGames}>
+                <Link href="/pairing" className="text-accent hover:underline">
+                  {t.players.h2h.startNight}
+                </Link>{" "}
+                {t.players.h2h.seeWhoWins}
+              </Empty>
+            ) : (
               <table className="table">
                 <thead>
                   <tr>
-                    <th>{t.games.date}</th>
-                    <th className="text-right">⚪ {t.common.white}</th>
+                    <th>{t.players.h2h.date}</th>
+                    <th>{pa.name}</th>
                     <th className="text-center">{t.common.result}</th>
-                    <th>⚫ {t.common.black}</th>
-                    <th>{t.games.event}</th>
-                    {admin && <th></th>}
+                    <th>{pb.name}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {games.map((g) => {
-                    const r = row(g);
+                  {h.games.map((g) => {
+                    const aWhite = g.whiteId === a;
+                    const sa = g.result ? (aWhite ? (g.result === "1-0" || g.result === "+/-" ? 1 : g.result === "1/2-1/2" ? 0.5 : 0) : g.result === "0-1" || g.result === "-/+" ? 1 : g.result === "1/2-1/2" ? 0.5 : 0) : null;
                     return (
-                      <tr key={g.id} className="hover:bg-panel-2/50">
-                        <td className="text-muted text-xs whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
-                        <td className={`text-right nowrap ${r.ww ? "font-semibold" : r.bw ? "text-muted" : ""}`}>
-                          <RatingDelta before={g.whiteRatingBefore} after={g.whiteRatingAfter} className="mr-2" />
-                          <PlayerLink id={g.whiteId} name={r.wn} />
-                          <span className="text-xs text-muted font-mono ml-1.5">{g.whiteRatingBefore}</span>
+                      <tr key={g.id}>
+                        <td className="text-xs text-muted whitespace-nowrap">{g.completedAt && formatDateTime(g.completedAt, lang)}</td>
+                        <td className={sa === 1 ? "font-semibold text-win" : sa === 0 ? "text-muted" : ""}>
+                          <span className="inline-flex items-center gap-2">
+                            <ColorDot color={aWhite ? "white" : "black"} /> {aWhite ? g.whiteRatingBefore : g.blackRatingBefore}
+                          </span>
                         </td>
-                        <td className="text-center nowrap">
-                          {r.fix ? (
-                            <ResultButtons gameId={g.id} current={g.result} names={{ white: r.wn, black: r.bn }} allowClear={false} />
-                          ) : (
-                            <span className="font-mono text-xs px-2 py-0.5 rounded bg-panel-2 border border-line">{resultLabel(g.result)}</span>
-                          )}
+                        <td className="text-center font-mono">{aWhite ? resultLabel(g.result) : flippedResultLabel(g.result)}</td>
+                        <td className={sa === 0 ? "font-semibold text-win" : sa === 1 ? "text-muted" : ""}>
+                          <span className="inline-flex items-center gap-2">
+                            <ColorDot color={aWhite ? "black" : "white"} /> {aWhite ? g.blackRatingBefore : g.whiteRatingBefore}
+                          </span>
                         </td>
-                        <td className={`nowrap ${r.bw ? "font-semibold" : r.ww ? "text-muted" : ""}`}>
-                          <span className="text-xs text-muted font-mono mr-1.5">{g.blackRatingBefore}</span>
-                          <PlayerLink id={g.blackId} name={r.bn} />
-                          <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-2" />
-                        </td>
-                        <td className="text-xs text-muted">{r.event}</td>
-                        {admin && (
-                          <td className="text-right">
-                            {!r.tr && (
-                              <ConfirmButton action={deleteGame.bind(null, g.id)} className="btn btn-sm btn-danger" confirmLabel={t.common.delete}>
-                                {t.common.delete}
-                              </ConfirmButton>
-                            )}
-                          </td>
-                        )}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-            </div>
-          </>
-        )}
-        {pages > 1 && (
-          <div className="px-5 py-3 border-t border-line flex justify-end">
-            <Pager page={page} pages={pages} link={link} labels={{ prev: t.games.prevPage, next: t.games.nextPage }} />
-          </div>
-        )}
-      </Section>
+            )}
+          </Section>
+        </div>
+      )}
     </>
-  );
-}
-
-function Pager({ page, pages, link, labels }: { page: number; pages: number; link: (o: Record<string, string | number | undefined>) => string; labels: { prev: string; next: string } }) {
-  return (
-    <span className="inline-flex items-center gap-1 text-xs">
-      <Link href={link({ page: Math.max(1, page - 1) })} className={`btn btn-sm ${page === 1 ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.prev}>
-        ←
-      </Link>
-      <span className="text-muted px-2 font-mono">
-        {page} / {pages}
-      </span>
-      <Link href={link({ page: Math.min(pages, page + 1) })} className={`btn btn-sm ${page === pages ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.next}>
-        →
-      </Link>
-    </span>
   );
 }

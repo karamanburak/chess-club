@@ -93,6 +93,8 @@ const en = {
   fixedKO: "Knockout: the bracket is fixed. A withdrawn player hands the match to their opponent.",
   rejoin: "Rejoin",
   withdraw: "Withdraw",
+  withdrawName: "Withdraw {name}",
+  rejoinName: "Bring {name} back",
   participantsHintStarted: "Players who already played stay in; withdraw them if they leave. Others can join or leave between rounds.",
   participantsHintNew: "Choose who plays.",
   saveParticipants: "Save participants",
@@ -114,6 +116,7 @@ const en = {
     hint: "Rearrange who plays whom. Each player may appear once. Leave both sides empty to drop a board.",
     saveBoards: "Save boards",
     empty: "— empty —",
+    boardSide: "Board {n}, {color}",
   },
   bracketUi: {
     upcoming: "· upcoming",
@@ -263,6 +266,8 @@ const de: typeof en = {
   fixedKO: "K.-o.-System: Der Turnierbaum steht fest. Ein zurückgezogener Spieler überlässt dem Gegner das Match.",
   rejoin: "Zurückholen",
   withdraw: "Zurückziehen",
+  withdrawName: "{name} zurückziehen",
+  rejoinName: "{name} zurückholen",
   participantsHintStarted: "Wer schon gespielt hat, bleibt drin; zieh ihn zurück, wenn er geht. Andere können zwischen den Runden dazukommen oder aussteigen.",
   participantsHintNew: "Wähle aus, wer spielt.",
   saveParticipants: "Teilnehmer speichern",
@@ -284,6 +289,7 @@ const de: typeof en = {
     hint: "Ordne neu, wer gegen wen spielt. Jeder Spieler darf nur einmal vorkommen. Lass beide Seiten leer, um ein Brett zu entfernen.",
     saveBoards: "Bretter speichern",
     empty: "— leer —",
+    boardSide: "Brett {n}, {color}",
   },
   bracketUi: {
     upcoming: "· ausstehend",

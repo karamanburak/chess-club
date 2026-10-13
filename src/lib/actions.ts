@@ -9,13 +9,14 @@ import { after } from "next/server";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BACKUP_NAME_RE, deleteBackup, migrate, mutate, newId, readBackup, readDb, replaceDb, snapshotLabel, takeSnapshot, wasPersisted } from "./db";
 import { mergeCheck, mergePlayers as mergeRecords, type MergeProblem } from "./merge";
-import { challengeCheck, combineDateTime, drawColors, effectiveStatus, expireChallenges, gameBySession, involves, nextSessionColors, openBetween, parseSession, PAST_GRACE_MS, pruneChallenges, recordable, sessionScore, TIME_CONTROL_RE, type ChallengeProblem } from "./challenges";
+import { challengeCheck, drawColors, effectiveStatus, expireChallenges, gameBySession, involves, nextSessionColors, openBetween, parseSession, PAST_GRACE_MS, pruneChallenges, recordable, sessionScore, TIME_CONTROL_RE, type ChallengeProblem } from "./challenges";
 import { RESULTS, recomputeRatings } from "./elo";
 import { generatePairings, nextPowerOfTwo, roundRobinSchedule, shuffle } from "./pairing";
 import {
   activeParticipants,
   activeSession,
   colorStats,
+  formatDateTime,
   knockoutRounds,
   previousPairs,
   resultLabel,
@@ -26,20 +27,22 @@ import {
   standings,
   TIEBREAK_PRESETS,
 } from "./queries";
-import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, hashPassword, isAdmin, isMember, requireAdmin, rotateSessionSecret, secureCookies, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
+import { adminConfigured, clearMeCookie, clearSessionCookie, currentPlayerId, deviceKey, ensureDeviceKey, hashPassword, isAdmin, isMember, requireAdmin, rotateSessionSecret, secureCookies, setMeCookie, setMemberCookie, setSessionCookie, verifyPassword } from "./auth";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { UserError } from "./errors";
 import { makeGame } from "./games";
+import { scoreText } from "./score";
 import { generateKnockoutRound, syncKnockout } from "./knockout";
 import { isAvatar, randomAvatar } from "./avatar";
-import { failAttempt, isLocked, LOCK_MAX_FAILS, reserveAttempt } from "./lockout";
-import { clearPinFails, PIN_RE, pinLocked, registerPinFail, reservePinAttempt } from "./pin";
+import { counterFor, failAttempt, isLocked, LOCK_MAX_FAILS, reserveAttempt, trustDevice } from "./lockout";
+import { clearPinFails, PIN_RE, pinLocked, pinSucceeded, registerPinFail, reservePinAttempt } from "./pin";
 import { applyReset, isResetScope, type ResetScope } from "./reset";
 import { SKIP_COOKIE, SKIP_DAYS } from "./tokens";
 import { dicts, fmt, isLang, LANG_COOKIE, pickLang, type Dict, type Lang } from "./i18n";
 import { getT } from "./lang";
 import { ntfyTopic, sendNotifications, type Notification } from "./notify";
 import { sendSlack, slackEscape, slackWebhook, type SlackMessage } from "./slack";
+import { addSubscription, cleanSubscription, pushKeys, sendPush, type PushMessage } from "./push";
 import { slackLine, type SlackFacts } from "./slack-lines";
 import { puzzleOfTheDay } from "./puzzles";
 import { isSolution } from "./puzzle-stats";
@@ -94,16 +97,19 @@ function revalidateAll() {
 /** A phone notification or Slack post queued inside mutate(), with the state it was written into (sent only if that one was saved). */
 type PendingNote = Notification & { from: Database };
 type PendingSlack = SlackMessage & { from: Database };
+/** A Web Push to one player's phones, queued the same way. */
+type PendingPush = PushMessage & { playerId: string; from: Database };
 
 interface Actor {
   admin: boolean;
-  owner?: boolean;
   /** Address the request came in on, for the "tap to open" link of phone notifications. */
   origin: string;
   /** Activity lines written during this action, sent to the admin's phone once the action is through. */
   notes: PendingNote[];
   /** Challenge news for the club's Slack channel, sent the same way. */
   slack: PendingSlack[];
+  /** Challenge news for one player's own phones (Web Push), sent the same way. */
+  push: PendingPush[];
   /** The claimed player acting. */
   me: string | null;
 }
@@ -111,7 +117,7 @@ interface Actor {
 const actor = new AsyncLocalStorage<Actor>();
 
 async function beginActor(): Promise<Actor> {
-  return { admin: await isAdmin(), origin: await requestOrigin(), notes: [], slack: [], me: await currentPlayerId() };
+  return { admin: await isAdmin(), origin: await requestOrigin(), notes: [], slack: [], push: [], me: await currentPlayerId() };
 }
 
 /** A redirect() is a thrown signal, not a failure: the action's writes went through. */
@@ -133,6 +139,23 @@ function notifyPhone(a: Actor): void {
   const slack = slackWebhook() ? once(a.slack).map((n): SlackMessage => ({ text: n.text, url: n.url, linkLabel: n.linkLabel })) : [];
   if (phone.length) after(() => sendNotifications(phone));
   if (slack.length) after(() => sendSlack(slack));
+  const seen = new Set<string>();
+  const pushes = pushKeys()
+    ? a.push.filter((n) => wasPersisted(n.from) && !seen.has(`${n.playerId}|${n.body}`) && seen.add(`${n.playerId}|${n.body}`))
+    : [];
+  if (pushes.length) after(() => deliverPush(pushes));
+}
+
+/** Sends queued pushes to the subscriptions saved with that state, then forgets the ones the push service calls gone. */
+async function deliverPush(list: PendingPush[]): Promise<void> {
+  const jobs = list
+    .map((n) => ({ subs: n.from.players.find((p) => p.id === n.playerId)?.pushSubs ?? [], message: { title: n.title, body: n.body, url: n.url } }))
+    .filter((j) => j.subs.length);
+  const gone = await sendPush(jobs);
+  if (!gone.length) return;
+  await mutate((db) => {
+    for (const p of db.players) if (p.pushSubs) p.pushSubs = p.pushSubs.filter((s) => !gone.includes(s.endpoint));
+  });
 }
 
 /** Builds the URL of the page the request came from, with the message attached as a flash toast. */
@@ -202,10 +225,9 @@ const LOG_KEEP = 500;
  */
 function log(db: Database, text: string): void {
   const who = actor.getStore();
-  const line = who?.owner ? `${text} [owner]` : text;
-  db.activity.push({ id: newId(), at: new Date().toISOString(), admin: who?.admin ?? false, text: line });
+  db.activity.push({ id: newId(), at: new Date().toISOString(), admin: who?.admin ?? false, text });
   if (db.activity.length > LOG_KEEP) db.activity.splice(0, db.activity.length - LOG_KEEP);
-  if (!db.settings.clubNotifyOff) who?.notes.push({ text: line, title: db.settings.club.name, admin: who.admin, url: who.origin ? `${who.origin}/admin#activity` : "", from: db });
+  if (!db.settings.clubNotifyOff) who?.notes.push({ text, title: db.settings.club.name, admin: who.admin, url: who.origin ? `${who.origin}/admin#activity` : "", from: db });
 }
 
 /**
@@ -217,6 +239,26 @@ function tellClub(db: Database, c: Challenge, text: (m: Dict["challenges"]["slac
   if (!who || db.settings.slackOff || !slackWebhook()) return;
   const lang = pickLang(db.settings.language);
   who.slack.push({ text: slackLine(db, c, lang, text), url: who.origin ? `${who.origin}/challenges` : "", linkLabel: dicts[lang].challenges.slack.link, from: db });
+}
+
+/**
+ * Tells the players of challenge `c` about a change on their own phones (Web Push), except whoever made it: when the
+ * admin acts for someone, both hear of it. In the club's language, like Slack; `by` is the other side's name.
+ * Nothing while the Admin switch is off or no VAPID keys are set.
+ */
+function tellPlayers(db: Database, c: Challenge, text: (m: Dict["challenges"]["push"], f: { by: string; details: string; when: string }) => string): void {
+  const who = actor.getStore();
+  if (!who || db.settings.pushOff || !pushKeys()) return;
+  const lang = pickLang(db.settings.language);
+  const m = dicts[lang].challenges;
+  const format = c.session ? fmt(m.sessionPill, { duration: m.durations[String(c.session.minutes) as keyof typeof m.durations] ?? String(c.session.minutes) }) : c.timeControl;
+  const when = formatDateTime(c.at, lang);
+  const details = [when, c.place, format].filter(Boolean).join(" · ");
+  for (const playerId of [c.fromId, c.toId]) {
+    if (playerId === who.me) continue;
+    const other = playerId === c.fromId ? c.toId : c.fromId;
+    who.push.push({ playerId, title: db.settings.club.name, body: text(m.push, { by: nameOf(db, other), details, when }), url: "/challenges", from: db });
+  }
 }
 
 /** Who is acting: the admin may edit any game, a claimed device only its own boards. */
@@ -233,46 +275,33 @@ async function requireMember(): Promise<void> {
   if (!who.admin && !who.me) throw new UserError((await msgs()).membersOnly);
 }
 
+type LockKey = "adminLock" | "memberLock";
+
 /**
- * The owner password gates the destructive admin tools. While none is set, being admin is enough
- * (the first-run state); once set, the action must carry it as the "owner" form field or as a
- * trailing string argument (ConfirmButton asks for it). Wrong tries share the lockout rules.
+ * Claims one try at a club secret before it is checked (see lockout.ts); false while it is locked for this device.
+ * A device that answered right before runs against its own counter, so strangers cannot lock it out.
  */
-async function requireOwner(source: FormData | string | undefined): Promise<void> {
-  await requireAdmin();
-  const { settings } = await readDb();
-  const hash = settings.ownerPasswordHash;
-  if (!hash) return;
-  const E = await msgs();
-  const pw = typeof source === "string" ? source.trim() : source instanceof FormData ? str(source, "owner") : "";
-  if (!pw) throw new UserError(E.ownerRequired);
-  if (!(await reserveTry("ownerLock"))) throw new UserError(E.ownerLocked);
-  if (!verifyPassword(pw, hash)) throw new UserError((await failTry("ownerLock", "Owner password")) ? E.ownerLocked : E.ownerWrong);
-  await clearTries("ownerLock");
-  const store = actor.getStore();
-  if (store) store.owner = true;
-}
-
-type LockKey = "adminLock" | "memberLock" | "ownerLock";
-
-/** Claims one try at a club secret before it is checked (see lockout.ts); false while it is locked. */
 async function reserveTry(key: LockKey): Promise<boolean> {
-  return mutate((db) => reserveAttempt((db.settings[key] ??= {})));
+  const device = await deviceKey();
+  return mutate((db) => reserveAttempt(counterFor((db.settings[key] ??= {}), device)));
 }
 
 /** The claimed try was wrong: locks once the window's tries are used up, logs that, and says whether it is locked now. */
 async function failTry(key: LockKey, what: string): Promise<boolean> {
+  const device = await deviceKey();
   return mutate((db) => {
-    const l = (db.settings[key] ??= {});
+    const l = counterFor((db.settings[key] ??= {}), device);
     const minutes = failAttempt(l);
-    if (minutes) log(db, `${what} locked for ${minutes} minutes after ${LOCK_MAX_FAILS} wrong tries`);
+    if (minutes) log(db, `${what} locked for ${minutes} minutes after ${LOCK_MAX_FAILS} wrong tries${l === db.settings[key] ? "" : " on one device"}`);
     return isLocked(l);
   });
 }
 
+/** The right answer: this device's counter starts fresh and the device gets a counter of its own from now on. */
 async function clearTries(key: LockKey): Promise<void> {
+  const device = await ensureDeviceKey();
   await mutate((db) => {
-    delete db.settings[key];
+    trustDevice((db.settings[key] ??= {}), device);
   });
 }
 
@@ -296,6 +325,12 @@ function playedAt(date: string, E: Msgs): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date === today) return new Date().toISOString();
   if (date > today) throw new UserError(E.dateInFuture);
   return zonedToUtc(date, "12:00") ?? new Date().toISOString();
+}
+
+/** The bye's worth from a form ("0.5" or "1"); anything else (field missing) keeps the fallback. */
+function byePointsFrom(fd: FormData, fallback: number): number {
+  const raw = str(fd, "byePoints");
+  return raw === "0.5" ? 0.5 : raw === "1" ? 1 : fallback;
 }
 
 function parseMode(raw: string): PairingMode {
@@ -323,15 +358,20 @@ export async function setLanguage(lang: Lang) {
 
 export async function setupAdmin(fd: FormData) {
   return run(async () => {
-    if (await adminConfigured()) throw new UserError((await msgs()).adminAlreadySet);
+    const E = await msgs();
+    if (await adminConfigured()) throw new UserError(E.adminAlreadySet);
     const pw = str(fd, "password");
     if (pw.length < 4) redirect("/admin?error=short");
     if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
+    const hash = hashPassword(pw);
     await mutate((db) => {
-      db.settings.adminPasswordHash = hashPassword(pw);
+      // Checked again inside the write: two first-run setups at the same moment must not both win.
+      if (db.settings.adminPasswordHash) throw new UserError(E.adminAlreadySet);
+      db.settings.adminPasswordHash = hash;
       log(db, "Admin password created");
     });
-    await setSessionCookie();
+    await clearTries("adminLock");
+    await setSessionCookie(hash);
     revalidateAll();
     redirect("/admin");
   }, OPEN_GATE);
@@ -344,11 +384,9 @@ export async function login(fd: FormData) {
     if (!settings.adminPasswordHash || !verifyPassword(str(fd, "password"), settings.adminPasswordHash)) {
       redirect((await failTry("adminLock", "Admin sign-in")) ? "/admin?error=locked" : "/admin?error=wrong");
     }
-    await setSessionCookie();
-    await mutate((db) => {
-      delete db.settings.adminLock;
-      log(db, "Admin signed in");
-    });
+    await setSessionCookie(settings.adminPasswordHash);
+    await clearTries("adminLock");
+    await mutate((db) => log(db, "Admin signed in"));
     revalidateAll();
     redirect(localPath(str(fd, "next"), "/admin"));
   }, OPEN_GATE);
@@ -364,68 +402,35 @@ export async function logout() {
 
 export async function changePassword(fd: FormData) {
   return run(async () => {
-    await requireOwner(fd);
+    await requireAdmin();
     const hash = (await readDb()).settings.adminPasswordHash;
-    if (!hash || !verifyPassword(str(fd, "current"), hash)) redirect("/admin?error=wrong");
     const pw = str(fd, "password");
     if (pw.length < 4) redirect("/admin?error=short");
     if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
+    // The current password is guessable like at sign-in, so it shares the sign-in brake.
+    if (!(await reserveTry("adminLock"))) redirect("/admin?error=locked");
+    if (!hash || !verifyPassword(str(fd, "current"), hash)) redirect((await failTry("adminLock", "Admin password change")) ? "/admin?error=locked" : "/admin?error=wrong");
+    await clearTries("adminLock");
+    const next = hashPassword(pw);
     await mutate((db) => {
-      db.settings.adminPasswordHash = hashPassword(pw);
+      db.settings.adminPasswordHash = next;
       log(db, "Admin password changed");
     });
     // Admin cookies are bound to the password hash: every other admin device is now signed out; this one gets a fresh cookie.
-    await setSessionCookie();
+    await setSessionCookie(next);
     redirect("/admin?ok=changed");
   });
 }
 
-/**
- * Sets or changes the owner password. The first one may be set by any admin (there is nothing to
- * protect it with yet); afterwards the current owner password is required, never the admin one.
- */
-export async function setOwnerPassword(fd: FormData) {
-  return run(async () => {
-    await requireAdmin();
-    const { settings } = await readDb();
-    if (settings.ownerPasswordHash) await requireOwner(str(fd, "current"));
-    const pw = str(fd, "password");
-    if (pw.length < 6) redirect("/admin?error=ownershort");
-    if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
-    const first = !settings.ownerPasswordHash;
-    await mutate((db) => {
-      db.settings.ownerPasswordHash = hashPassword(pw);
-      delete db.settings.ownerLock;
-      log(db, first ? "Owner password set: destructive admin tools now require it" : "Owner password changed");
-    });
-    revalidateAll();
-    redirect(first ? "/admin?ok=ownerset" : "/admin?ok=ownerchanged");
-  });
-}
-
-/** Turns the owner password off: the destructive tools fall back to the admin password alone. Needs the owner password once more. */
-export async function clearOwnerPassword(owner?: string) {
-  return run(async () => {
-    await requireOwner(owner);
-    await mutate((db) => {
-      delete db.settings.ownerPasswordHash;
-      delete db.settings.ownerLock;
-      log(db, "Owner password turned off: the admin password alone opens every tool again");
-    });
-    revalidateAll();
-    redirect("/admin?ok=owneroff");
-  });
-}
-
-const SWITCHES = { selfSignup: "selfSignupOff", clubNotify: "clubNotifyOff", slack: "slackOff" } as const;
+const SWITCHES = { selfSignup: "selfSignupOff", clubNotify: "clubNotifyOff", slack: "slackOff", push: "pushOff" } as const;
 export type SwitchKey = keyof typeof SWITCHES;
-const SWITCH_LOG: Record<SwitchKey, string> = { selfSignup: "Self sign-up", clubNotify: "Admin phone notifications", slack: "Slack channel posts" };
+const SWITCH_LOG: Record<SwitchKey, string> = { selfSignup: "Self sign-up", clubNotify: "Admin phone notifications", slack: "Slack channel posts", push: "Push notifications to members" };
 
 /** Flips one of the plain on/off switches on Admin. */
 export async function setSwitch(key: SwitchKey, on: boolean) {
   return run(async () => {
     await requireAdmin();
-    if (!(key in SWITCHES)) throw new Error(`unknown switch ${key}`);
+    if (!Object.hasOwn(SWITCHES, key)) throw new Error(`unknown switch ${key}`);
     await mutate((db) => {
       const flag = SWITCHES[key];
       if (on) delete db.settings[flag];
@@ -438,7 +443,7 @@ export async function setSwitch(key: SwitchKey, on: boolean) {
 }
 
 /**
- * Forgotten admin or owner password. Only available when the server has ADMIN_RESET_TOKEN in its environment
+ * Forgotten admin password. Only available when the server has ADMIN_RESET_TOKEN in its environment
  * (Vercel → Settings → Environment Variables, or .env.local). The token is compared in constant time;
  * remove it again once the password is set.
  */
@@ -450,31 +455,25 @@ export async function resetAdminPassword(fd: FormData) {
     // Compare digests, so neither the time taken nor an early length mismatch tells anything about the token.
     const digest = (v: string) => createHash("sha256").update(v).digest();
     if (!timingSafeEqual(digest(str(fd, "token")), digest(expected))) redirect("/admin?error=badtoken");
-    const which = str(fd, "which") === "owner" ? "owner" : "admin";
     const pw = str(fd, "password");
-    if (pw.length < (which === "owner" ? 6 : 4)) redirect(which === "owner" ? "/admin?error=ownershort" : "/admin?error=short");
+    if (pw.length < 4) redirect("/admin?error=short");
     if (pw !== str(fd, "confirm")) redirect("/admin?error=mismatch");
+    const fresh = hashPassword(pw);
     await mutate((db) => {
-      if (which === "owner") {
-        db.settings.ownerPasswordHash = hashPassword(pw);
-        delete db.settings.ownerLock;
-        log(db, "Owner password reset with the recovery token");
-      } else {
-        db.settings.adminPasswordHash = hashPassword(pw);
-        delete db.settings.adminLock;
-        log(db, "Admin password reset with the recovery token");
-      }
+      db.settings.adminPasswordHash = fresh;
+      delete db.settings.adminLock;
+      log(db, "Admin password reset with the recovery token");
     });
-    if (which === "admin") await setSessionCookie();
+    await setSessionCookie(fresh);
     revalidateAll();
-    redirect(which === "owner" ? "/admin?ok=recoveredowner" : "/admin?ok=recovered");
+    redirect("/admin?ok=recovered");
   }, OPEN_GATE);
 }
 
 /** Rotates the signing secret: every admin, member and "this is me" cookie on every device stops working, this one included. */
-export async function signOutEverywhere(owner?: string) {
+export async function signOutEverywhere() {
   return run(async () => {
-    await requireOwner(owner);
+    await requireAdmin();
     await rotateSessionSecret();
     await mutate((db) => log(db, "All devices signed out (session secret rotated)"));
     await clearSessionCookie();
@@ -502,7 +501,7 @@ export async function updateSettings(fd: FormData) {
 /** Replaces the database with an uploaded JSON file. The current state is kept as a snapshot first. */
 export async function importDatabase(fd: FormData) {
   return run(async () => {
-    await requireOwner(fd);
+    await requireAdmin();
     const file = fd.get("file");
     if (!(file instanceof File) || file.size === 0) redirect("/admin?error=nofile");
     let parsed: unknown;
@@ -537,9 +536,9 @@ export async function createSnapshot(fd: FormData) {
   });
 }
 
-export async function removeBackup(file: string, owner?: string) {
+export async function removeBackup(file: string) {
   return run(async () => {
-    await requireOwner(owner);
+    await requireAdmin();
     const E = await msgs();
     if (!BACKUP_NAME_RE.test(file)) throw new UserError(E.invalidBackupName);
     if (!(await deleteBackup(file))) throw new UserError(E.backupNotFound);
@@ -548,9 +547,9 @@ export async function removeBackup(file: string, owner?: string) {
   });
 }
 
-export async function restoreBackup(file: string, owner?: string) {
+export async function restoreBackup(file: string) {
   return run(async () => {
-    await requireOwner(owner);
+    await requireAdmin();
     const E = await msgs();
     if (!BACKUP_NAME_RE.test(file)) throw new UserError(E.invalidBackupName);
     const next = await readBackup(file);
@@ -579,7 +578,7 @@ const MERGE_ERRORS: Record<MergeProblem, keyof Msgs> = {
  */
 export async function mergePlayers(fd: FormData) {
   return run(async () => {
-    await requireOwner(fd);
+    await requireAdmin();
     const E = await msgs();
     const fromId = str(fd, "fromId");
     const intoId = str(fd, "intoId");
@@ -611,9 +610,9 @@ const RESET_LOG: Record<ResetScope, string> = {
  * Danger zone: bulk delete. The current state is kept as a labeled snapshot first
  * (`db-before-reset-<scope>-<time>.json`), so a slip can be undone from the backup list.
  */
-export async function resetData(scope: ResetScope, owner?: string) {
+export async function resetData(scope: ResetScope) {
   return run(async () => {
-    await requireOwner(owner);
+    await requireAdmin();
     if (!isResetScope(scope)) throw new UserError((await msgs()).unknownResetScope);
     // Built from the state inside the write queue, not this request's cached read: nothing saved meanwhile is lost.
     await replaceDb((next) => {
@@ -653,7 +652,7 @@ export async function updateClub(fd: FormData) {
 /** Sets or changes the club-wide member code. Every member is asked for the new one once. */
 export async function setMemberCode(fd: FormData) {
   return run(async () => {
-    await requireOwner(fd);
+    await requireAdmin();
     const code = str(fd, "code");
     if (code.length < 4) redirect("/admin?error=codeshort");
     if (code !== str(fd, "confirm")) redirect("/admin?error=codemismatch");
@@ -667,9 +666,9 @@ export async function setMemberCode(fd: FormData) {
 }
 
 /** Turns the door code off: the club is open to anyone who knows the address again. */
-export async function clearMemberCode(owner?: string) {
+export async function clearMemberCode() {
   return run(async () => {
-    await requireOwner(owner);
+    await requireAdmin();
     await mutate((db) => {
       delete db.settings.memberCodeHash;
       log(db, "Member code turned off");
@@ -783,6 +782,10 @@ export async function addPlayer(fd: FormData) {
     const name = nameField(fd);
     if (!name) return;
     const E = await msgs();
+    // An optional first PIN: without one the first device to pick this face sets it, which the admin may not want.
+    const pin = str(fd, "pin");
+    if (pin && !PIN_RE.test(pin)) throw new UserError(E.pinFormatOrEmpty);
+    const pinHash = pin ? hashPassword(pin) : undefined;
     await mutate((db) => {
       if (db.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) throw new UserError(fmt(E.playerExists, { name }));
       const rating = num(fd, "rating", db.settings.startRating);
@@ -798,8 +801,9 @@ export async function addPlayer(fd: FormData) {
         active: true,
         createdAt: new Date().toISOString(),
         avatar: randomAvatar(),
+        ...(pinHash ? { pinHash } : {}),
       });
-      log(db, `Player ${name} added (start Elo ${rating})`);
+      log(db, `Player ${name} added (start Elo ${rating}${pinHash ? ", PIN set by the admin" : ""})`);
       recomputeRatings(db);
     });
     revalidateAll();
@@ -848,6 +852,38 @@ export async function setAvatar(id: string, seed: string) {
 /* Identity: "This is me" with a four-digit PIN                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Checks a player's PIN under the lockout: the try is counted before the PIN is compared (so parallel guesses cannot
+ * all pass one read of an open lock), a wrong one may lock, a right one trusts this device.
+ */
+async function checkPin(id: string, pin: string, pinHash: string): Promise<"ok" | "wrong" | "locked"> {
+  const device = await deviceKey();
+  const reserved = await mutate((d) => {
+    const q = d.players.find((x) => x.id === id);
+    return !!q && reservePinAttempt(q, Date.now(), device);
+  });
+  if (!reserved) return "locked";
+  if (!verifyPassword(pin, pinHash)) {
+    const locked = await mutate((d) => {
+      const q = d.players.find((x) => x.id === id);
+      if (!q) return false;
+      const minutes = registerPinFail(q, Date.now(), device);
+      if (minutes) log(d, `Too many wrong PINs for ${q.name}${device && q.pinDevices?.[device] ? " on one device" : ""}; locked for ${minutes} minutes`);
+      return pinLocked(q, Date.now(), device);
+    });
+    return locked ? "locked" : "wrong";
+  }
+  const trusted = await ensureDeviceKey();
+  await mutate((d) => {
+    const q = d.players.find((x) => x.id === id);
+    if (q) pinSucceeded(q, trusted);
+  });
+  return "ok";
+}
+
+/** Self sign-ups allowed per rolling day, club-wide: a cleared cookie must not turn into a stream of new players. */
+const SELF_SIGNUPS_PER_DAY = 5;
+
 /** A newcomer adds themselves once: name plus PIN, and this device becomes theirs right away. */
 export async function registerSelf(fd: FormData) {
   return run(async () => {
@@ -861,10 +897,15 @@ export async function registerSelf(fd: FormData) {
     if (pin !== str(fd, "confirm")) throw new UserError(E.pinMismatch);
     const id = newId();
     const pinHash = hashPassword(pin);
+    const device = await ensureDeviceKey();
     await mutate((db) => {
       if (db.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
         throw new UserError(fmt(E.nameAlreadyListed, { name }));
       }
+      const dayAgo = Date.now() - 86400_000;
+      const recent = (db.settings.signupTimes ?? []).filter((at) => new Date(at).getTime() > dayAgo);
+      if (recent.length >= SELF_SIGNUPS_PER_DAY) throw new UserError(E.signupBusy);
+      db.settings.signupTimes = [...recent, new Date().toISOString()];
       const rating = db.settings.startRating;
       db.players.push({
         id,
@@ -879,6 +920,7 @@ export async function registerSelf(fd: FormData) {
         createdAt: new Date().toISOString(),
         avatar: randomAvatar(),
         pinHash,
+        pinDevices: { [device]: {} },
       });
       log(db, `${name} joined the club (start Elo ${rating})`);
       recomputeRatings(db);
@@ -913,32 +955,17 @@ export async function claimWithPin(fd: FormData) {
       if (pin !== str(fd, "confirm")) back("mismatch");
       const fresh = hashPassword(pin);
       pinHash = fresh;
+      const device = await ensureDeviceKey();
       await mutate((d) => {
         const q = d.players.find((x) => x.id === id)!;
         if (q.pinHash) throw new UserError(E.pinJustSet);
         q.pinHash = fresh;
+        pinSucceeded(q, device);
         log(d, `${q.name} set their PIN and claimed their profile`);
       });
     } else {
-      // The try is counted before the PIN is checked, so parallel guesses cannot all pass one read of an open lock.
-      const reserved = await mutate((d) => {
-        const q = d.players.find((x) => x.id === id);
-        return !!q && reservePinAttempt(q);
-      });
-      if (!reserved) back("locked");
-      if (!verifyPassword(pin, pinHash)) {
-        const locked = await mutate((d) => {
-          const q = d.players.find((x) => x.id === id);
-          const minutes = q ? registerPinFail(q) : 0;
-          if (q && minutes) log(d, `Too many wrong PINs for ${q.name}; locked for ${minutes} minutes`);
-          return !!q && pinLocked(q);
-        });
-        back(locked ? "locked" : "wrong");
-      }
-      await mutate((d) => {
-        const q = d.players.find((x) => x.id === id);
-        if (q) clearPinFails(q);
-      });
+      const outcome = await checkPin(id, pin, pinHash);
+      if (outcome !== "ok") back(outcome);
     }
     await setMeCookie(id, pinHash);
     revalidateAll();
@@ -961,7 +988,9 @@ export async function changeOwnPin(fd: FormData) {
   return run(async () => {
     const id = str(fd, "playerId");
     const E = await msgs();
-    if ((await currentPlayerId()) !== id) throw new UserError(E.pinNotYours);
+    const own = (await currentPlayerId()) === id;
+    // The admin may set it too (as with the avatar); they need no current PIN, the player's own device does.
+    if (!own && !(await isAdmin())) throw new UserError(E.pinNotYours);
     const current = str(fd, "current");
     const pin = str(fd, "pin");
     if (!PIN_RE.test(pin)) throw new UserError(E.newPinFormat);
@@ -969,7 +998,10 @@ export async function changeOwnPin(fd: FormData) {
     const db = await readDb();
     const p = db.players.find((x) => x.id === id);
     if (!p) throw new UserError(E.playerNotFound);
-    if (p.pinHash && !verifyPassword(current, p.pinHash)) throw new UserError(E.currentPinWrong);
+    if (own && p.pinHash) {
+      const outcome = await checkPin(id, current, p.pinHash);
+      if (outcome !== "ok") throw new UserError(outcome === "locked" ? E.pinLockedTry : E.currentPinWrong);
+    }
     const pinHash = hashPassword(pin);
     await mutate((d) => {
       const q = d.players.find((x) => x.id === id)!;
@@ -977,10 +1009,69 @@ export async function changeOwnPin(fd: FormData) {
       clearPinFails(q);
       log(d, `${q.name} changed their PIN`);
     });
-    // The new PIN signs the player's other devices out; this one stays in.
-    await setMeCookie(id, pinHash);
+    // The new PIN signs the player's other devices out; this one stays in (the admin's device keeps whoever it is).
+    if (own) await setMeCookie(id, pinHash);
     revalidateAll();
     redirect(noticeUrl(`/players/${id}`, E.pinChanged));
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Web Push: a member's own phones                                     */
+/* ------------------------------------------------------------------ */
+
+/** This phone wants challenge news for the player it belongs to (the claimed device only; push.ts checks the input). */
+export async function savePushSubscription(input: unknown) {
+  return attempt(async () => {
+    const E = await msgs();
+    const me = await currentPlayerId();
+    if (!me) throw new UserError(E.pushNeedsMe);
+    if (!pushKeys()) throw new UserError(E.pushOff);
+    const sub = cleanSubscription(input);
+    if (!sub) throw new UserError(E.pushInvalid);
+    await mutate((db) => {
+      const p = db.players.find((x) => x.id === me);
+      if (!p) throw new UserError(E.playerNotFound);
+      const fresh = !p.pushSubs?.some((x) => x.endpoint === sub.endpoint);
+      p.pushSubs = addSubscription(p.pushSubs, sub, new Date().toISOString());
+      if (fresh) log(db, `${p.name} turned on push notifications on a device`);
+    });
+  });
+}
+
+/** This phone no longer wants them (also called when the browser dropped its subscription). */
+export async function removePushSubscription(endpoint: string) {
+  return attempt(async () => {
+    const me = await currentPlayerId();
+    if (!me || typeof endpoint !== "string") return;
+    await mutate((db) => {
+      const p = db.players.find((x) => x.id === me);
+      if (!p?.pushSubs) return;
+      p.pushSubs = p.pushSubs.filter((x) => x.endpoint !== endpoint);
+      if (!p.pushSubs.length) delete p.pushSubs;
+    });
+  });
+}
+
+/** A test notification to every phone of the claimed player, so they can see it works. */
+export async function sendTestPush() {
+  return attempt(async () => {
+    const E = await msgs();
+    const me = await currentPlayerId();
+    if (!me) throw new UserError(E.pushNeedsMe);
+    const keys = pushKeys();
+    if (!keys) throw new UserError(E.pushOff);
+    const db = await readDb();
+    const p = db.players.find((x) => x.id === me);
+    if (!p?.pushSubs?.length) throw new UserError(E.pushNoDevice);
+    const { t } = await getT();
+    const gone = await sendPush([{ subs: p.pushSubs, message: { title: db.settings.club.name, body: t.players.push.testBody, url: `/players/${me}` } }], keys);
+    if (gone.length) {
+      await mutate((d) => {
+        const q = d.players.find((x) => x.id === me);
+        if (q?.pushSubs) q.pushSubs = q.pushSubs.filter((x) => !gone.includes(x.endpoint));
+      });
+    }
   });
 }
 
@@ -1094,7 +1185,7 @@ export async function createChallenge(_prev: ChallengeFormState, fd: FormData): 
     const fromId = who.admin && str(fd, "fromId") ? str(fd, "fromId") : who.me;
     const toId = str(fd, "toId");
     if (!fromId) throw new UserError(E.membersOnly);
-    const at = combineDateTime(str(fd, "date"), str(fd, "time"));
+    const at = zonedToUtc(str(fd, "date"), str(fd, "time"));
     if (!at) throw new UserError(E.challengePast);
     const session = parseSession(str(fd, "kind"), str(fd, "minutes"), str(fd, "scoring"));
     if (session === "invalid") throw new UserError(E.sessionDetails);
@@ -1128,6 +1219,7 @@ export async function createChallenge(_prev: ChallengeFormState, fd: FormData): 
       const what = session ? ` (session ${session.minutes} min, ${session.scoring === "each" ? "every game counts" : "one game"})` : "";
       log(db, `${nameOf(db, fromId)} challenged ${nameOf(db, toId)} for ${localStamp(at)}${what}${str(fd, "rated") === "off" ? " (unrated)" : ""}`);
       tellClub(db, db.challenges[db.challenges.length - 1], (m, f) => fmt(m.created, f));
+      tellPlayers(db, db.challenges[db.challenges.length - 1], (m, f) => fmt(m.created, f));
     });
     revalidateAll();
   });
@@ -1158,6 +1250,7 @@ export async function answerChallenge(id: string, answer: "accept" | "decline") 
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} ${c.status}${c.whiteId ? `, ${nameOf(db, c.whiteId)} has white` : ""}`);
       if (c.status === "accepted") tellClub(db, c, (m, f) => fmt(m.accepted, f));
+      tellPlayers(db, c, (m, f) => fmt(c.status === "accepted" ? m.accepted : m.declined, f));
     });
     revalidateAll();
   });
@@ -1168,7 +1261,7 @@ export async function proposeChallengeTime(id: string, fd: FormData) {
   return run(async () => {
     const E = await msgs();
     const who = await challengeActor();
-    const at = combineDateTime(str(fd, "date"), str(fd, "time"));
+    const at = zonedToUtc(str(fd, "date"), str(fd, "time"));
     // Same rules as a new challenge: "right now" still passes, the minute of another open game of the pair does not.
     if (!at || new Date(at).getTime() < Date.now() - PAST_GRACE_MS) throw new UserError(E.challengePast);
     const minute = (iso: string) => Math.floor(new Date(iso).getTime() / 60_000);
@@ -1179,14 +1272,25 @@ export async function proposeChallengeTime(id: string, fd: FormData) {
       if (!who.admin && (!who.me || !involves(c, who.me))) throw new UserError(E.challengeNotYours);
       if (openBetween(db, c.fromId, c.toId).some((o) => o.id !== c.id && minute(o.at) === minute(at))) throw new UserError(E.challengeExists);
       if (c.gameIds?.length) throw new UserError(E.sessionHasGames);
+      // A new time may move the place or the format too, under the same rules as createChallenge.
+      if (fd.has("place")) {
+        const place = str(fd, "place").slice(0, 80);
+        if (!place) throw new UserError(E.challengeDetails);
+        c.place = place;
+      }
+      if (fd.has("timeControl") && !c.session) {
+        const timeControl = str(fd, "timeControl");
+        if (!timeControl) throw new UserError(E.challengeDetails);
+        if (!TIME_CONTROL_RE.test(timeControl)) throw new UserError(E.timeControlFormat);
+        c.timeControl = timeControl;
+      }
       c.at = at;
-      if (str(fd, "place") || fd.has("place")) c.place = str(fd, "place").slice(0, 80);
-      if (fd.has("timeControl")) c.timeControl = str(fd, "timeControl").slice(0, 20);
       c.status = "pending";
       c.whiteId = null;
       c.proposedBy = who.me && involves(c, who.me) ? who.me : c.fromId;
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)}: new time ${localStamp(at)} proposed by ${nameOf(db, c.proposedBy)}`);
+      tellPlayers(db, c, (m, f) => fmt(m.newTime, f));
     });
     revalidateAll();
   });
@@ -1205,6 +1309,7 @@ export async function cancelChallenge(id: string) {
       c.status = "cancelled";
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge ${nameOf(db, c.fromId)} – ${nameOf(db, c.toId)} withdrawn`);
+      tellPlayers(db, c, (m, f) => fmt(m.withdrawn, f));
     });
     revalidateAll();
   });
@@ -1240,6 +1345,7 @@ export async function recordChallengeResult(id: string, fd: FormData) {
       c.updatedAt = new Date().toISOString();
       log(db, `Challenge played: ${nameOf(db, whiteId)} – ${nameOf(db, blackId)} ${resultLabel(result)}`);
       tellClub(db, c, (m) => fmt(m.result, { game: slackEscape(`${nameOf(db, whiteId)} ${resultLabel(result)} ${nameOf(db, blackId)}`) }));
+      tellPlayers(db, c, (m) => fmt(m.result, { game: `${nameOf(db, whiteId)} ${resultLabel(result)} ${nameOf(db, blackId)}` }));
       recomputeRatings(db);
     });
     revalidateAll();
@@ -1296,15 +1402,10 @@ export async function finishSession(id: string) {
       const line = `${nameOf(db, c.fromId)} ${scoreText(score.from)}–${scoreText(score.to)} ${nameOf(db, c.toId)}`;
       log(db, `Session finished: ${line} (${score.games} games)`);
       tellClub(db, c, (m) => fmt(m.sessionResult, { score: slackEscape(line), games: String(score.games) }));
+      tellPlayers(db, c, (m) => fmt(m.sessionResult, { score: line, games: String(score.games) }));
     });
     revalidateAll();
   });
-}
-
-/** 3.5 → "3½" for score lines. */
-function scoreText(n: number): string {
-  const whole = Math.floor(n);
-  return n - whole === 0.5 ? (whole ? `${whole}½` : "½") : String(n);
 }
 
 /**
@@ -1471,7 +1572,7 @@ export async function createTournament(fd: FormData) {
         rated: fd.get("rated") !== "off",
         timeControl: str(fd, "timeControl"),
         tiebreaks: tiebreaksFrom(fd, mode === "roundrobin" ? TIEBREAK_PRESETS.find((p) => p.key === "rr")!.order : db.settings.defaultTiebreaks),
-        byePoints: str(fd, "byePoints") === "0.5" ? 0.5 : db.settings.byePoints,
+        byePoints: byePointsFrom(fd, db.settings.byePoints),
         participantIds,
         withdrawnIds: [],
         rounds: [],
@@ -1524,7 +1625,7 @@ export async function updateTournament(id: string, fd: FormData) {
           delete t.knockout;
         }
         t.rated = fd.get("rated") === "on";
-        t.byePoints = str(fd, "byePoints") === "0.5" ? 0.5 : 1;
+        t.byePoints = byePointsFrom(fd, t.byePoints);
       }
       log(db, `Tournament "${t.name}" settings edited`);
     });
@@ -1566,6 +1667,9 @@ export async function setParticipants(id: string, fd: FormData) {
 export async function toggleWithdraw(id: string, playerId: string) {
   return run(async () => {
     await requireMember();
+    // A member withdraws (or rejoins) only themselves: in a bracket a withdrawal hands the match to the opponent.
+    const who = await whoActs();
+    if (!who.admin && who.me !== playerId) throw new UserError((await msgs()).withdrawSelfOnly);
     await mutate((db) => {
       const t = db.tournaments.find((x) => x.id === id);
       if (!t || !t.participantIds.includes(playerId)) return;

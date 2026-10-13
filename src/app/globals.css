@@ -28,7 +28,7 @@
   --panel-3: #e7e4db;
   --line: #dedbd1;
   --fg: #1d1f24;
-  --muted: #6b7183;
+  --muted: #5f6577; /* ≥ 4.5:1 on --bg, --panel, --panel-2 and --panel-3 */
   /* Dark enough for white button text and small accent text on the light page (WCAG AA, 4.5:1). */
   --accent: #96660b;
   --accent-fg: #ffffff;

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { answerChallenge, cancelChallenge } from "@/lib/actions";
-import { effectiveStatus, involves, isToday, pendingFor, sentBy, upcoming } from "@/lib/challenges";
+import { effectiveStatus, involves, pendingFor, sentBy, upcoming } from "@/lib/challenges";
+import { sameLocalDay } from "@/lib/time";
 import { fmt, type Dict, type Lang } from "@/lib/i18n";
 import { formatDateTime, playerMap } from "@/lib/queries";
 import type { Challenge, Database } from "@/lib/types";
@@ -65,7 +66,7 @@ export async function MyChallenges({ db, me, admin, t, lang }: { db: Database; m
             <ul className="grid gap-1.5 md:grid-cols-2">
               {g.items.map((c) => {
                 const o = other(c);
-                const today = (g.kind === "agreed" || g.kind === "elsewhere") && isToday(c.at);
+                const today = (g.kind === "agreed" || g.kind === "elsewhere") && sameLocalDay(c.at);
                 return (
                   <li key={c.id} className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border px-3 py-2 ${today ? "border-accent/50 bg-accent/5" : "border-line/60"}`}>
                     {o ? (

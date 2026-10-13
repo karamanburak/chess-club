@@ -1,9 +1,9 @@
-import type { ClubSession, Database, Game, GameResult, Player, TiebreakKey, Tournament } from "./types";
+import type { ClubSession, Database, Game, Player, TiebreakKey, Tournament } from "./types";
 import { clubTimeZone, localMonth } from "./time";
 import { fmt, localeOf, type Dict, type Lang } from "./i18n";
 import { tournaments as tournamentMessages } from "./i18n/messages/tournaments";
 import { EMPTY_COLOR, pairKey, type ColorStats } from "./pairing";
-import { countsForRating, isForfeit, performanceRating, recomputeRatings, scoreFor } from "./elo";
+import { countsForRating, isForfeit, performanceRating, scoreFor } from "./elo";
 
 /* ------------------------------------------------------------------ */
 /* Basics                                                              */
@@ -28,6 +28,19 @@ export function completedGames(db: Database): Game[] {
 
 export function gamesForPlayer(db: Database, playerId: string): Game[] {
   return completedGames(db).filter((g) => g.whiteId === playerId || g.blackId === playerId);
+}
+
+/** Completed games of every player, newest first: one sort for the whole club instead of one per player. */
+export function completedGamesByPlayer(db: Database): Map<string, Game[]> {
+  const out = new Map<string, Game[]>();
+  for (const g of completedGames(db)) {
+    for (const id of [g.whiteId, g.blackId]) {
+      const list = out.get(id);
+      if (list) list.push(g);
+      else out.set(id, [g]);
+    }
+  }
+  return out;
 }
 
 export function playerScore(g: Game, playerId: string): number | null {
@@ -66,12 +79,29 @@ export function ratingHistory(db: Database, player: Player): RatingPoint[] {
   return points;
 }
 
-/** Ratings as they stood at a given moment, by replaying only the games completed before it. */
+/**
+ * Ratings as they stood at a given moment. Same answer as replaying only the games completed up to it, without the
+ * replay: recomputeRatings() runs in (completedAt, seq) order, so that replay is a prefix of the stored one and each
+ * player's rating is the `*RatingAfter` of their last counted game inside it (the start rating without one).
+ * Relies on the stored replay being current, which every mutation keeps (see CLAUDE.md: ratings are derived).
+ */
 export function ratingsAsOf(db: Database, isoDate: string): Map<string, number> {
-  const clone: Database = JSON.parse(JSON.stringify(db));
-  clone.games = clone.games.filter((g) => g.completedAt !== null && g.completedAt <= isoDate);
-  recomputeRatings(clone);
-  return new Map(clone.players.map((p) => [p.id, p.rating]));
+  const out = new Map(db.players.map((p) => [p.id, p.initialRating]));
+  const last = new Map<string, Game>();
+  const later = (x: Game, y: Game) => (x.completedAt ?? "").localeCompare(y.completedAt ?? "") > 0 || (x.completedAt === y.completedAt && x.seq > y.seq);
+  for (const g of db.games) {
+    if (!countsForRating(g) || g.completedAt > isoDate) continue;
+    if (!out.has(g.whiteId) || !out.has(g.blackId)) continue; // the replay skips games of deleted players too
+    for (const id of [g.whiteId, g.blackId]) {
+      const prev = last.get(id);
+      if (!prev || later(g, prev)) last.set(id, g);
+    }
+  }
+  for (const [id, g] of last) {
+    const after = g.whiteId === id ? g.whiteRatingAfter : g.blackRatingAfter;
+    if (after !== null) out.set(id, after);
+  }
+  return out;
 }
 
 /** Rank change of active players compared to `daysAgo`. Positive = moved up. */
@@ -154,8 +184,12 @@ export interface Streaks {
   unbeaten: number;
 }
 
-export function streaks(db: Database, playerId: string): Streaks {
-  const games = gamesForPlayer(db, playerId).filter(countsForRating); // newest first
+/** `games`: the player's completed games newest first, e.g. from completedGamesByPlayer(); looked up when omitted. */
+export function streaks(db: Database, playerId: string, games: Game[] = gamesForPlayer(db, playerId)): Streaks {
+  return streaksOf(games.filter(countsForRating), playerId);
+}
+
+function streaksOf(games: Game[], playerId: string): Streaks {
   let current: Streaks["current"] = null;
   for (const g of games) {
     const s = playerScore(g, playerId)!;
@@ -238,15 +272,6 @@ export function rivals(db: Database, playerId: string): Rival[] {
 /* Tournament standings, tiebreaks, crosstable                         */
 /* ------------------------------------------------------------------ */
 
-export const TIEBREAK_LABELS: Record<TiebreakKey, { short: string; label: string; help: string }> = {
-  buchholz: { short: "Bh", label: "Buchholz", help: "Sum of all opponents' points" },
-  sonneborn: { short: "SB", label: "Sonneborn-Berger", help: "Points of beaten opponents plus half the points of drawn opponents" },
-  direct: { short: "DE", label: "Direct encounter", help: "Result of the games between the tied players" },
-  progressive: { short: "Prog", label: "Progressive", help: "Sum of the running score after each round; rewards early wins" },
-  wins: { short: "Wins", label: "Number of wins", help: "More wins ranks higher" },
-  blackwins: { short: "BW", label: "Wins with black", help: "More wins with black ranks higher" },
-};
-
 export type TiebreakPresetKey = keyof Dict["tournaments"]["tiebreakPresets"];
 
 /** English labels by default; pass `t.tournaments.tiebreakPresets` (or use `tiebreakPresets(m)`) for the current language. */
@@ -328,7 +353,7 @@ export function standings(db: Database, t: Tournament): StandingRow[] {
       if (r) {
         r.points += t.byePoints;
         r.byes += 1;
-        r.roundScores[idx] = t.byePoints;
+        r.roundScores[idx] = (r.roundScores[idx] ?? 0) + t.byePoints;
       }
     }
     for (const pairing of round.pairings) {
@@ -343,7 +368,7 @@ export function standings(db: Database, t: Tournament): StandingRow[] {
         w.points += sw;
         w.games += 1;
         w.opponents.push(g.blackId);
-        w.roundScores[idx] = sw;
+        w.roundScores[idx] = (w.roundScores[idx] ?? 0) + sw; // a knockout round may hold tiebreak games too
         if (sw === 1) {
           w.wins++;
           if (forfeit) w.forfeitsWon++;
@@ -358,7 +383,7 @@ export function standings(db: Database, t: Tournament): StandingRow[] {
         b.points += 1 - sw;
         b.games += 1;
         b.opponents.push(g.whiteId);
-        b.roundScores[idx] = 1 - sw;
+        b.roundScores[idx] = (b.roundScores[idx] ?? 0) + (1 - sw);
         if (sw === 0) {
           b.wins++;
           b.blackWins++;
@@ -374,6 +399,8 @@ export function standings(db: Database, t: Tournament): StandingRow[] {
   }
 
   for (const r of rows.values()) {
+    // Plain Buchholz on purpose: the sum of the opponents' points as they stand, no FIDE "virtual opponent" for byes or
+    // forfeits and no cut. Simple to explain at a club night; the tiebreak order behind it settles the rest.
     r.buchholz = r.opponents.reduce((sum, id) => sum + (rows.get(id)?.points ?? 0), 0);
     let running = 0;
     r.progressive = r.roundScores.reduce<number>((sum, s) => {
@@ -584,8 +611,9 @@ export function clubStats(db: Database): ClubStats {
   for (const [playerId, n] of perPlayer) if (!mostActive || n > mostActive.games) mostActive = { playerId, games: n };
 
   let longestWinStreak: ClubStats["longestWinStreak"] = null;
+  const byPlayer = completedGamesByPlayer(db);
   for (const p of db.players) {
-    const s = streaks(db, p.id);
+    const s = streaks(db, p.id, byPlayer.get(p.id) ?? []);
     if (s.longestWin > 0 && (!longestWinStreak || s.longestWin > longestWinStreak.length)) longestWinStreak = { playerId: p.id, length: s.longestWin };
   }
 
@@ -626,9 +654,26 @@ export function monthsWithGames(db: Database): string[] {
  * games played over the board (no forfeits), so the month champion and the season agree.
  */
 export function monthTable(db: Database, month: string): MonthRow[] {
-  const rows = new Map<string, MonthRow>();
+  return monthRows(db.games.filter((g) => countsForRating(g) && localMonth(new Date(g.completedAt)) === month));
+}
+
+/** Counted games (see monthTable) grouped by club month, each game's month worked out once. */
+export function countedGamesByMonth(db: Database): Map<string, Game[]> {
+  const out = new Map<string, Game[]>();
   for (const g of db.games) {
-    if (!countsForRating(g) || localMonth(new Date(g.completedAt)) !== month) continue;
+    if (!countsForRating(g)) continue;
+    const month = localMonth(new Date(g.completedAt));
+    const list = out.get(month);
+    if (list) list.push(g);
+    else out.set(month, [g]);
+  }
+  return out;
+}
+
+/** The month table over games already picked for one month. */
+export function monthRows(games: Game[]): MonthRow[] {
+  const rows = new Map<string, MonthRow>();
+  for (const g of games) {
     for (const id of [g.whiteId, g.blackId]) {
       let r = rows.get(id);
       if (!r) {
@@ -653,13 +698,7 @@ export function monthTable(db: Database, month: string): MonthRow[] {
 /* Formatting                                                          */
 /* ------------------------------------------------------------------ */
 
-export function resultLabel(result: GameResult | null): string {
-  if (!result) return "–";
-  if (result === "1/2-1/2") return "½–½";
-  if (result === "+/-") return "+ / –";
-  if (result === "-/+") return "– / +";
-  return result.replace("-", "–");
-}
+export { resultLabel } from "./score";
 
 /** Dates are shown in club time (see time.ts), not in the server's zone: Vercel runs in UTC. */
 export function formatDate(iso: string, lang: Lang = "en"): string {
@@ -709,8 +748,12 @@ export interface MatchState {
   walkover: boolean;
 }
 
-export function matchState(db: Database, m: { a: string | null; b: string | null; gameIds: string[]; winnerId: string | null }): MatchState {
-  const games = new Map(db.games.map((g) => [g.id, g]));
+/** Pass `games` (id → game) when calling this for many matches, so the map is built once. */
+export function matchState(
+  db: Database,
+  m: { a: string | null; b: string | null; gameIds: string[]; winnerId: string | null },
+  games: ReadonlyMap<string, Game> = new Map(db.games.map((g) => [g.id, g])),
+): MatchState {
   let scoreA = 0;
   let scoreB = 0;
   let played = 0;
@@ -791,7 +834,6 @@ export function knockoutPlacement(db: Database, t: Tournament, m: Dict["tourname
   push(fourth, 4, m.placementLabels.fourth);
   // Remaining players grouped by the round they were knocked out of, deepest first.
   const rest = t.participantIds.filter((id) => !placed.has(id));
-  rest.sort((x, y) => (reached.get(y) ?? 0) - (reached.get(x) ?? 0) || (players.get(y)?.rating ?? 0) - (players.get(x)?.rating ?? 0));
   let place = rows.length + 1;
   let lastRound = -1;
   let groupStart = place;

@@ -15,6 +15,20 @@ export function isSolution(p: Pick<Puzzle, "moves" | "alt">, moves: readonly str
   return mine.every((m, i) => moves[i] === m || (i === mine.length - 1 && !!p.alt?.includes(moves[i])));
 }
 
+/**
+ * Puzzle days kept in `db.puzzleSolves` (migrate() drops older ones): the whole club lives in one jsonb row, so the
+ * list must not grow forever. A bit more than a year covers the current streak and the Admin table; the consequence
+ * is that "best run" and the solved/shown totals only look back this far.
+ */
+export const PUZZLE_KEEP_DAYS = 400;
+
+/** The solves within the kept window, counted back from `today` (YYYY-MM-DD). Returns the same array when nothing is dropped. */
+export function trimPuzzleSolves(list: PuzzleSolve[], today: string, keepDays = PUZZLE_KEEP_DAYS): PuzzleSolve[] {
+  const [y, m, d] = today.split("-").map(Number);
+  const cutoff = new Date(Date.UTC(y, m - 1, d - keepDays)).toISOString().slice(0, 10);
+  return list.some((s) => s.day < cutoff) ? list.filter((s) => s.day >= cutoff) : list;
+}
+
 /** The day before a YYYY-MM-DD, as YYYY-MM-DD (calendar arithmetic in UTC, no time zone involved). */
 export function dayBefore(day: string): string {
   const [y, m, d] = day.split("-").map(Number);

@@ -106,6 +106,8 @@ flowchart LR
 | `NTFY_TOPIC` | Pushes every activity-log line to this [ntfy](https://ntfy.sh) topic, see *Phone notifications*. | empty |
 | `NTFY_URL` | Self-hosted ntfy server. | `https://ntfy.sh` |
 | `SLACK_WEBHOOK_URL` | Posts new, agreed and played challenges to one Slack channel, see *Slack channel*. | empty |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Push notifications to members' own phones, see *Member notifications*. | empty |
+| `VAPID_SUBJECT` | A `mailto:` or `https:` contact the push services may use. | placeholder |
 | `NEXT_DIST_DIR` | Build folder, so a second instance does not fight the first one over `.next`. | `.next` |
 
 Club-level settings (starting Elo, bye points, default tiebreaks, language, passwords, member code) live in the app
@@ -118,7 +120,21 @@ under Admin, not in the environment. A `.env.example` is included.
    Postgres works.
 3. Deploy. The app creates its two tables on the first request.
 4. Open `/admin`, create the admin password, then **Data → Import** your local `data/db.json` to carry the club over.
-5. On **Security** set an owner password and a member code, so the public address is not an open door.
+5. On **Security** set a member code, so the public address is not an open door.
+
+## Member notifications
+
+Members can get their own challenge news on their phone (Web Push, no extra app): someone challenged them, answered,
+proposed another time, withdrew, or a result was recorded. Never anything about other people's games.
+
+1. Generate a key pair once: `bunx web-push generate-vapid-keys`.
+2. Put both keys into `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (Vercel: Settings → Environment Variables), plus
+   `VAPID_SUBJECT=mailto:you@example.org`, and redeploy.
+3. Each member opens their own profile and taps **Turn on** under *Notifications on this phone*, then **Send a test**.
+   On an iPhone this works only from the club added to the Home Screen (Share → Add to Home Screen, iOS 16.4+).
+
+It needs HTTPS (Vercel, or `localhost`); a laptop on the club Wi-Fi at `http://192.168…` cannot do push. The Admin
+**Switches** card turns it off for everyone. The admin's feed of every activity line stays on ntfy (below).
 
 ## Phone notifications
 
@@ -153,9 +169,6 @@ anything else stay in the app.
 
 - **Admin password** – salted scrypt hash; the signed httpOnly cookie is bound to that hash, so changing the password
   signs every other admin device out.
-- **Owner password** – optional second password for the destructive tools (danger zone, import and restore, deleting
-  snapshots, merging players, member code, admin password, sign out everyone). Asked per action. The admin password
-  alone cannot change it.
 - **Member code** – optional shared code for the whole club, like a Wi-Fi password. Devices are remembered for 90 days;
   a new code signs everyone out.
 - **Player PIN** – four digits per player; only that device (or the admin) can touch that player's results and profile.
@@ -163,7 +176,7 @@ anything else stay in the app.
 - **Brute-force brake** – five wrong tries lock a PIN, password or code for ten minutes, twice as long after each further lock.
 - **Sign out everyone** – rotates the cookie secret; every device signs in again.
 - **Headers** – Content-Security-Policy, frame and sniffing protection, referrer and permissions policies, `noindex`.
-- **Recovery** – set `ADMIN_RESET_TOKEN`, open `/admin` → *Forgot the password?*, choose admin or owner password, then
+- **Recovery** – set `ADMIN_RESET_TOKEN`, open `/admin` → *Forgot the password?*, set a new admin password, then
   remove the variable. Locally you can also delete the hash field from `data/db.json`.
 
 ## What it is not

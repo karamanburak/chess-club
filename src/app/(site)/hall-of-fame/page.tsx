@@ -5,8 +5,11 @@ import { getT } from "@/lib/lang";
 import { puzzleStats } from "@/lib/puzzle-stats";
 import { localDay } from "@/lib/time";
 import { fmt, plural } from "@/lib/i18n";
-import { achievements, currentSeason, monthChampions, seasonTable, titleFor, TITLES, tournamentWinners } from "@/lib/club";
+import { achievements, currentSeason, seasonChampion, monthChampions, seasonTable, titleFor, TITLES, tournamentWinners } from "@/lib/club";
 import { clubStats, formatDate, formatMonth, leaderboard, playerMap, resultLabel } from "@/lib/queries";
+import { nameOf } from "@/lib/score";
+import { Icon } from "@/components/icons";
+import { StatsTabs } from "@/components/StatsTabs";
 import { Avatar, Empty, PageHeader, PlayerLink, Rank, Section, TitleBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +20,8 @@ export default async function HallOfFamePage() {
   const admin = await isAdmin();
   const club = db.settings.club;
   const names = playerMap(db);
-  const name = (id: string | null) => (id ? (names.get(id)?.name ?? "?") : "–");
+  const name = (id: string | null) => (id ? nameOf(names, id) : "–");
+  const achievementLabel = (a: { key: string; label: string }) => t.club.achievements[a.key as keyof typeof t.club.achievements]?.label ?? a.label;
   const season = currentSeason(db);
   const table = season ? seasonTable(db, season).slice(0, 8) : [];
   const past = db.seasons.filter((s) => s.end).sort((a, b) => b.start.localeCompare(a.start));
@@ -41,6 +45,7 @@ export default async function HallOfFamePage() {
 
   return (
     <>
+      <StatsTabs active="hall" />
       <PageHeader
         eyebrow={club.name}
         title={t.hall.title}
@@ -93,7 +98,16 @@ export default async function HallOfFamePage() {
                           {r.ratingChange}
                         </td>
                         <td className="text-right font-mono text-muted hidden xl:table-cell">{r.nights}</td>
-                        <td className="text-right hidden xl:table-cell">{r.titles ? "🏆".repeat(r.titles) : <span className="text-muted">–</span>}</td>
+                        <td className="text-right hidden xl:table-cell">{r.titles ? (
+                            <span className="inline-flex items-center justify-end gap-0.5 text-accent" title={String(r.titles)}>
+                              {Array.from({ length: r.titles }, (_, k) => (
+                                <Icon key={k} name="trophy" className="h-4 w-4" />
+                              ))}
+                              <span className="sr-only">{r.titles}</span>
+                            </span>
+                          ) : (
+                            <span className="text-muted">–</span>
+                          )}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -107,27 +121,28 @@ export default async function HallOfFamePage() {
               <Empty icon="crown" title={t.hall.noSeasonClosed}>{t.hall.firstChampion}</Empty>
             ) : (
               <ul className="divide-y divide-line">
-                {past.map((s) => (
+                {past.map((s) => {
+                  const champ = seasonChampion(db, s);
+                  return (
                   <li key={s.id} className="flex items-center gap-4 px-4 py-3">
-                    <span className="text-2xl" aria-hidden>
-                      👑
-                    </span>
+                    <Icon name="crown" className="h-6 w-6 shrink-0 text-accent" />
                     <span className="flex-1 min-w-0">
                       <span className="block font-medium">{s.name}</span>
                       <span className="block text-xs text-muted">
                         {formatDate(s.start, lang)} – {s.end ? formatDate(s.end, lang) : ""}
                       </span>
                     </span>
-                    {s.championId ? (
+                    {champ ? (
                       <span className="flex items-center gap-2">
-                        <Avatar id={s.championId} name={name(s.championId)} size="md" />
-                        <PlayerLink id={s.championId} name={name(s.championId)} className="font-semibold" />
+                        <Avatar id={champ} name={name(champ)} size="md" />
+                        <PlayerLink id={champ} name={name(champ)} className="font-semibold" />
                       </span>
                     ) : (
                       <span className="text-sm text-muted">{t.hall.noGames}</span>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </Section>
@@ -139,9 +154,7 @@ export default async function HallOfFamePage() {
               <ul className="divide-y divide-line">
                 {winners.map((w) => (
                   <li key={w.tournament.id} className="flex items-center gap-4 px-4 py-3">
-                    <span className="text-2xl" aria-hidden>
-                      🏆
-                    </span>
+                    <Icon name="trophy" className="h-6 w-6 shrink-0 text-accent" />
                     <span className="flex-1 min-w-0">
                       <Link href={`/tournaments/${w.tournament.id}`} className="block font-medium hover:text-accent truncate">
                         {w.tournament.name}
@@ -215,9 +228,12 @@ export default async function HallOfFamePage() {
                 {decorated.map(({ p, earned }) => (
                   <li key={p.id} className="flex items-center gap-3">
                     <PlayerLink id={p.id} name={p.name} avatar className="flex-1 font-medium" />
-                    <span className="text-base tracking-wide" title={earned.map((a) => t.club.achievements[a.key as keyof typeof t.club.achievements]?.label ?? a.label).join(", ")}>
-                      {earned.slice(0, 6).map((a) => a.icon).join(" ")}
-                      {earned.length > 6 && <span className="text-xs text-muted ml-1">+{earned.length - 6}</span>}
+                    <span className="inline-flex items-center gap-1.5 text-accent" title={earned.map((a) => achievementLabel(a)).join(", ")}>
+                      <span className="sr-only">{earned.map((a) => achievementLabel(a)).join(", ")}</span>
+                      {earned.slice(0, 6).map((a) => (
+                        <Icon key={a.key} name={a.icon} className="h-4 w-4" />
+                      ))}
+                      {earned.length > 6 && <span className="text-xs text-muted ml-0.5" aria-hidden>+{earned.length - 6}</span>}
                     </span>
                   </li>
                 ))}
@@ -261,7 +277,10 @@ export default async function HallOfFamePage() {
                 {st.longestWinStreak ? (
                   <span className="flex items-center gap-2">
                     <PlayerLink id={st.longestWinStreak.playerId} name={name(st.longestWinStreak.playerId)} />
-                    <span className="font-mono">🔥 {st.longestWinStreak.length}</span>
+                    <span className="inline-flex items-center gap-1 font-mono">
+                      <Icon name="flame" className="h-4 w-4 text-accent" />
+                      {st.longestWinStreak.length}
+                    </span>
                   </span>
                 ) : (
                   <span className="text-muted">–</span>

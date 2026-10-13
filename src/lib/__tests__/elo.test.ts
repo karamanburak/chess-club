@@ -90,3 +90,21 @@ describe("recomputeRatings", () => {
     expect(g2.whiteRatingBefore).toBe(1180);
   });
 });
+
+describe("K factor and unrated games", () => {
+  test("unrated games count as played but do not end the provisional K=40 period", () => {
+    // 30 unrated friendlies first, then one rated win between equals: K is still 40, so +20.
+    const games = Array.from({ length: 30 }, () => game("a", "b", "1/2-1/2", { rated: false }));
+    const d = db([player("a", 1500), player("b", 1500)], [...games, game("a", "b", "1-0")]);
+    recomputeRatings(d);
+    const a = d.players.find((p) => p.id === "a")!;
+    expect(a.gamesPlayed).toBe(31);
+    expect(a.ratedGames).toBe(1);
+    expect(a.rating).toBe(1520);
+  });
+
+  test("kFactor reads the rated-game count when it is known", () => {
+    expect(kFactor({ gamesPlayed: 50, ratedGames: 5, rating: 1500 })).toBe(40);
+    expect(kFactor({ gamesPlayed: 50, ratedGames: 30, rating: 1500 })).toBe(20);
+  });
+});

@@ -12,6 +12,8 @@ export interface Player {
   initialRating: number;
   rating: number;
   gamesPlayed: number;
+  /** Rated games among them (derived by recomputeRatings); the K factor reads this, so unrated friendlies do not end the provisional period. */
+  ratedGames?: number;
   wins: number;
   draws: number;
   losses: number;
@@ -26,6 +28,18 @@ export interface Player {
   pinLockedUntil?: string | null;
   /** PIN locks since the last right PIN; each doubles the next (lockout.ts). */
   pinLocks?: number;
+  /** Devices that entered the right PIN before, each with its own counter (lockout.ts). */
+  pinDevices?: Record<string, Lockout>;
+  /** Phones that asked for Web Push on this player's profile (push.ts); never exported. */
+  pushSubs?: PushSub[];
+}
+
+/** One phone's Web Push subscription: where the push service takes messages for it, and its encryption keys. */
+export interface PushSub {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  /** When it was added (ISO). */
+  at: string;
 }
 
 export interface Game {
@@ -153,19 +167,20 @@ export interface Settings {
   /** Club default UI language; a device can override it with the cc_lang cookie. */
   language?: "en" | "de";
   adminPasswordHash?: string;
-  /** Second, rarer password that gates the destructive admin tools (danger zone, import/restore, member code, passwords). Unset = admin suffices. */
-  ownerPasswordHash?: string;
   /** Club-wide member code (scrypt hash). Unset = no code asked, open club. */
   memberCodeHash?: string;
   /** Switches on Admin (unset = on): "I am new, join the club", the admin's phone feed, challenge news in Slack. */
   selfSignupOff?: boolean;
   clubNotifyOff?: boolean;
   slackOff?: boolean;
+  /** Admin switch: no Web Push to members' phones (unset = on, when VAPID keys are set). */
+  pushOff?: boolean;
   sessionSecret?: string;
   /** Brute-force brakes for the admin password and the member code (see src/lib/lockout.ts). */
   adminLock?: Lockout;
   memberLock?: Lockout;
-  ownerLock?: Lockout;
+  /** When the last self sign-ups happened (ISO), for the daily cap in registerSelf. */
+  signupTimes?: string[];
 }
 
 export type ChallengeStatus = "pending" | "accepted" | "declined" | "played" | "cancelled" | "expired";

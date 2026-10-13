@@ -4,14 +4,16 @@ import { currentPlayerId, isAdmin } from "@/lib/auth";
 import { MyChallenges } from "@/components/MyChallenges";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
-import { currentSeason, daysUntil, highlights, seasonOverdue, titleFor } from "@/lib/club";
-import { activeSession, completedGames, formatDateTime, leaderboard, playerMap, rankChanges, recentForm, ratingTrend, resultLabel, sessionRoundComplete, streaks } from "@/lib/queries";
-import { Avatar, Empty, FormDots, PlayerLink, Provisional, Rank, RankMove, RatingDelta, Section, StatusBadge, StreakBadge, TitleBadge } from "@/components/ui";
+import { currentSeason, highlights, seasonOverdue, titleFor } from "@/lib/club";
+import { activeSession, completedGames, completedGamesByPlayer, formatDateTime, leaderboard, playerMap, rankChanges, recentForm, ratingTrend, resultLabel, sessionRoundComplete, streaks } from "@/lib/queries";
+import { Avatar, Empty, FormDots, Pager, PlayerLink, Provisional, Rank, RankMove, RatingDelta, Section, StatusBadge, StreakBadge, TitleBadge } from "@/components/ui";
+import { nameOf } from "@/lib/score";
 import { Icon, KnightMark } from "@/components/icons";
 import { QuoteOfTheDay } from "@/components/QuoteOfTheDay";
 import { DailyPuzzle } from "@/components/DailyPuzzle";
 import { lichessPuzzleUrl, puzzleOfTheDay } from "@/lib/puzzles";
-import { localDay } from "@/lib/time";
+import { upcoming } from "@/lib/challenges";
+import { daysFromToday, localDay } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -30,16 +32,19 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const shown = board.slice(offset, offset + PAGE);
   const names = playerMap(db);
   const played = completedGames(db);
-  const recent = played.slice(0, 10);
+  // A ranking row is about 1.4 times as tall as a game row: this many games end level with the table beside them.
+  const recent = played.slice(0, Math.max(10, Math.round(shown.length * 1.4)));
   const open = db.tournaments.filter((t) => t.status !== "finished").sort((a, b) => b.date.localeCompare(a.date));
   const top = board[0];
   const night = activeSession(db);
   const nightRound = night?.rounds[night.rounds.length - 1];
   const nightPending = nightRound ? nightRound.pairings.filter((p) => !db.games.find((g) => g.id === p.gameId)?.result).length : 0;
   const moves = rankChanges(db);
+  const byPlayer = completedGamesByPlayer(db);
+  const pageHref = (n: number) => (n <= 1 ? "/" : `/?page=${n}`);
   const club = db.settings.club;
   const season = currentSeason(db);
-  const next = daysUntil(club.nextNight);
+  const next = daysFromToday(club.nextNight);
   const nextLabel = next === null || next < 0 ? null : next === 0 ? t.common.tonight : next === 1 ? t.common.tomorrow : fmt(t.common.inDays, { n: next });
   const hl = highlights(db, 14, t.club.highlights);
   const me = await currentPlayerId();
@@ -50,6 +55,12 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const savedPuzzle = mySolve ? { result: mySolve.result, misses: mySolve.misses, hint: mySolve.hint } : null;
   const member = admin || !!me;
   const overdue = season && admin ? seasonOverdue(season) : null;
+  // A claimed device sees its own numbers where a guest sees the club's: what a member opens the page for.
+  const mine = me ? db.players.find((p) => p.id === me) : undefined;
+  const myRank = mine ? board.findIndex((p) => p.id === mine.id) + 1 : 0;
+  const myTrend = mine ? ratingTrend(db, mine.id) : null;
+  const myNext = me ? upcoming(db, me)[0] : undefined;
+  const bottomCards = 1 + (showPuzzle ? 1 : 0) + (hl.length > 0 ? 1 : 0);
 
   return (
     <>
@@ -92,35 +103,82 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         {club.announcement && <div className="relative mt-4 rounded-xl border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm flex items-start gap-2"><Icon name="pin" className="h-4 w-4 mt-0.5 shrink-0 text-accent" /> <span>{club.announcement}</span></div>}
       </section>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <div className="stat">
-          <span className="stat-label">{t.home.activePlayers}</span>
-          <span className="stat-value">{board.length}</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">{t.home.gamesPlayed}</span>
-          <span className="stat-value">{played.length}</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">{t.home.tournaments}</span>
-          <span className="stat-value">
-            {db.tournaments.length}
-            {open.length > 0 && <span className="text-sm text-accent ml-2">{fmt(t.home.nLive, { n: open.length })}</span>}
-          </span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">{t.home.topRated}</span>
-          {top ? (
-            <span className="flex items-center gap-2 min-w-0">
-              <Avatar id={top.id} name={top.name} size="sm" />
-              <span className="truncate font-medium">{top.name}</span>
-              <span className="font-mono text-accent ml-auto">{top.rating}</span>
+      {mine ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <Link href={`/players/${mine.id}`} className="stat hover:border-accent/50 transition-colors">
+            <span className="stat-label">{t.home.yourElo}</span>
+            <span className="stat-value flex items-baseline gap-2">
+              <span className="font-mono">{mine.rating}</span>
+              {myTrend !== null && myTrend !== 0 && (
+                <span className={`font-mono text-sm ${myTrend > 0 ? "text-win" : "text-loss"}`} title={t.home.trendHint}>
+                  {myTrend > 0 ? "+" : ""}
+                  {myTrend}
+                </span>
+              )}
             </span>
-          ) : (
-            <span className="stat-value text-muted">–</span>
-          )}
+          </Link>
+          <div className="stat">
+            <span className="stat-label">{t.home.yourRank}</span>
+            <span className="stat-value flex items-baseline gap-2">
+              {myRank > 0 ? `#${myRank}` : "–"}
+              {myRank > 0 && <span className="text-sm text-muted">{fmt(t.home.rankOf, { n: board.length })}</span>}
+              <RankMove delta={moves.get(mine.id)} />
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">{t.home.yourForm}</span>
+            <span className="flex items-center min-h-8">
+              <FormDots results={recentForm(db, mine.id)} />
+            </span>
+          </div>
+          <Link href="/challenges" className="stat hover:border-accent/50 transition-colors">
+            <span className="stat-label">{t.home.yourNext}</span>
+            {myNext ? (
+              <span className="flex items-center gap-2 min-w-0">
+                <Avatar id={myNext.fromId === me ? myNext.toId : myNext.fromId} name={nameOf(names, myNext.fromId === me ? myNext.toId : myNext.fromId)} size="sm" />
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{nameOf(names, myNext.fromId === me ? myNext.toId : myNext.fromId)}</span>
+                  <span className="block text-xs text-muted">{formatDateTime(myNext.at, lang)}</span>
+                </span>
+              </span>
+            ) : (
+              <span className="text-sm text-accent inline-flex items-center gap-1.5">
+                <Icon name="swords" className="h-4 w-4" /> {t.home.challengeSomeone}
+              </span>
+            )}
+          </Link>
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="stat">
+            <span className="stat-label">{t.home.activePlayers}</span>
+            <span className="stat-value">{board.length}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">{t.home.gamesPlayed}</span>
+            <span className="stat-value">{played.length}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">{t.home.tournaments}</span>
+            <span className="stat-value">
+              {db.tournaments.length}
+              {open.length > 0 && <span className="text-sm text-accent ml-2">{fmt(t.home.nLive, { n: open.length })}</span>}
+            </span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">{t.home.topRated}</span>
+            {top ? (
+              <span className="flex items-center gap-2 min-w-0">
+                <Avatar id={top.id} name={top.name} size="sm" />
+                <span className="truncate font-medium">{top.name}</span>
+                <span className="font-mono text-accent ml-auto">{top.rating}</span>
+              </span>
+            ) : (
+              <span className="stat-value text-muted">–</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Personal first, full width: what waits on me. Then two lists of similar height side by side, then three small cards. */}
       <div className="mb-6 empty:hidden">
@@ -138,7 +196,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               {sessionRoundComplete(db, nightRound) ? t.home.allResultsIn : fmt(t.home.stillPlaying, { n: nightPending })}
             </span>
           </span>
-          <span className="text-muted">→</span>
+          <Icon name="arrow-right" className="h-4 w-4 text-muted" />
         </Link>
       )}
 
@@ -148,7 +206,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           flush
           right={
             <span className="flex items-center gap-2">
-              {pages > 1 && <Pager page={page} pages={pages} labels={{ prev: t.home.prevPage, next: t.home.nextPage }} />}
+              {pages > 1 && <Pager page={page} pages={pages} href={pageHref} />}
               <Link href="/h2h" className="btn btn-sm btn-ghost">
                 {t.home.headToHead}
               </Link>
@@ -182,7 +240,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                   {shown.map((p, idx) => {
                     const i = offset + idx;
                     const trend = ratingTrend(db, p.id);
-                    const st = streaks(db, p.id);
+                    const st = streaks(db, p.id, byPlayer.get(p.id) ?? []);
                     return (
                       <tr key={p.id} className={`hover:bg-panel-2/50 ${p.id === me ? "bg-accent/5" : ""}`}>
                         <td>
@@ -203,7 +261,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                         <td className="text-right nowrap">
                           <span className={`font-mono text-base ${i === 0 ? "text-accent" : ""}`}>{p.rating}</span>
                           {trend !== null && trend !== 0 && (
-                            <span className={`block font-mono text-[11px] leading-tight ${trend > 0 ? "text-win" : "text-loss"}`} title={t.home.trendHint}>
+                            <span className={`block font-mono text-xs leading-tight ${trend > 0 ? "text-win" : "text-loss"}`} title={t.home.trendHint}>
                               {trend > 0 ? "+" : ""}
                               {trend}
                             </span>
@@ -228,7 +286,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               {pages > 1 && (
                 <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-line text-xs text-muted">
                   <span>{fmt(t.home.playersRange, { from: offset + 1, to: offset + shown.length, total: board.length })}</span>
-                  <Pager page={page} pages={pages} labels={{ prev: t.home.prevPage, next: t.home.nextPage }} />
+                  <Pager page={page} pages={pages} href={pageHref} />
                 </div>
               )}
             </div>
@@ -240,8 +298,8 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           ) : (
             <ul className="flex flex-col divide-y divide-line/60 -my-2 text-sm">
               {recent.map((g) => {
-                const w = names.get(g.whiteId)?.name ?? "?";
-                const b = names.get(g.blackId)?.name ?? "?";
+                const w = nameOf(names, g.whiteId);
+                const b = nameOf(names, g.blackId);
                 const whiteWon = g.result === "1-0" || g.result === "+/-";
                 const blackWon = g.result === "0-1" || g.result === "-/+";
                 return (
@@ -255,7 +313,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                       <PlayerLink id={g.blackId} name={b} />
                       <RatingDelta before={g.blackRatingBefore} after={g.blackRatingAfter} className="ml-1.5" />
                     </span>
-                    <span className="text-[11px] text-muted whitespace-nowrap hidden sm:inline">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
+                    <span className="text-xs text-muted whitespace-nowrap hidden sm:inline">{g.completedAt && formatDateTime(g.completedAt, lang)}</span>
                   </li>
                 );
               })}
@@ -264,11 +322,12 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </Section>
       </div>
 
-      <div className={`mt-6 grid gap-6 md:grid-cols-2 ${showPuzzle ? "lg:grid-cols-3" : ""}`}>
+      {/* As many columns as there are cards, so no empty third slot when there is nothing to highlight. */}
+      <div className={`mt-6 grid gap-6 ${bottomCards > 1 ? "md:grid-cols-2" : ""} ${bottomCards > 2 ? "lg:grid-cols-3" : ""}`}>
         {/* Members only (a device that entered its PIN, or the admin). The club's own cards come first; the puzzle,
             a daily extra, sits last: a full row on tablets (the board wants width), a third on desktop. */}
         {showPuzzle && (
-          <Section title={t.puzzle.title} className="md:col-span-2 lg:col-span-1 lg:order-last">
+          <Section title={t.puzzle.title} className={`${bottomCards > 2 ? "md:col-span-2 lg:col-span-1" : ""} lg:order-last`}>
             <DailyPuzzle puzzle={puzzle} day={today} url={lichessPuzzleUrl(puzzle)} record={!!me} saved={savedPuzzle} />
           </Section>
         )}
@@ -307,7 +366,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
                     <Icon name={h.icon} className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-[11px] uppercase tracking-wider text-muted">{h.title}</span>
+                    <span className="block text-xs uppercase tracking-wider text-muted">{h.title}</span>
                     <span className="block text-sm">
                       {h.playerId ? (
                         <Link href={`/players/${h.playerId}`} className="hover:text-accent">
@@ -325,22 +384,5 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         )}
       </div>
     </>
-  );
-}
-
-function Pager({ page, pages, labels }: { page: number; pages: number; labels: { prev: string; next: string } }) {
-  const href = (n: number) => (n <= 1 ? "/" : `/?page=${n}`);
-  return (
-    <span className="inline-flex items-center gap-1 text-xs">
-      <Link href={href(page - 1)} className={`btn btn-sm ${page === 1 ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.prev}>
-        ←
-      </Link>
-      <span className="text-muted px-2 font-mono">
-        {page} / {pages}
-      </span>
-      <Link href={href(page + 1)} className={`btn btn-sm ${page === pages ? "pointer-events-none opacity-40" : ""}`} aria-label={labels.next}>
-        →
-      </Link>
-    </span>
   );
 }

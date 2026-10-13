@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { recomputeRatings } from "../elo";
-import { achievements, currentSeason, daysUntil, highlights, monthChampions, nextTitle, seasonOverdue, seasonTable, titleFor, TITLE_GAMES, tournamentWinners } from "../club";
+import { achievements, currentSeason, highlights, monthChampions, nextTitle, seasonChampion, seasonOverdue, seasonTable, titleFor, TITLE_GAMES, tournamentWinners } from "../club";
 import { db, game, player, tournament } from "./fixtures";
 import type { Season } from "../types";
-import { localDay } from "../time";
 
 describe("titles", () => {
   test("need TITLE_GAMES games and follow rating bands", () => {
@@ -110,6 +109,29 @@ describe("seasons", () => {
     expect(currentSeason(d)?.id).toBe("open");
     expect(seasonTable(d, d.seasons[0])[0]).toMatchObject({ playerId: "a", points: 1 });
   });
+
+  test("a closed season's champion follows the table, also after a backdated game", () => {
+    const closed: Season = { id: "c", name: "C", start: "2026-01-01", end: "2026-01-31", championId: "a" };
+    const d = db([player("a"), player("b")], [game("a", "b", "1-0", { completedAt: "2026-01-10T12:00:00.000Z" })]);
+    d.seasons.push(closed);
+    recomputeRatings(d);
+    expect(seasonChampion(d, closed)).toBe("a");
+    expect(achievements(d, "a").find((x) => x.key === "season-champion")?.earnedAt).not.toBeNull();
+    // Two games entered later, dated inside the closed season: b overtakes a.
+    d.games.push(game("b", "a", "1-0", { completedAt: "2026-01-20T12:00:00.000Z" }), game("b", "a", "1-0", { completedAt: "2026-01-21T12:00:00.000Z" }));
+    recomputeRatings(d);
+    expect(seasonTable(d, closed)[0].playerId).toBe("b");
+    expect(seasonChampion(d, closed)).toBe("b");
+    expect(achievements(d, "b").find((x) => x.key === "season-champion")?.earnedAt).toBe("2026-01-31T23:59:59.000Z");
+    expect(achievements(d, "a").find((x) => x.key === "season-champion")?.earnedAt).toBeNull();
+  });
+
+  test("an open season has no champion yet", () => {
+    const d = db([player("a"), player("b")], [game("a", "b", "1-0", { completedAt: new Date().toISOString() })]);
+    const open: Season = { id: "o", name: "O", start: "2020-01-01", end: null, championId: null };
+    recomputeRatings(d);
+    expect(seasonChampion(d, open)).toBeNull();
+  });
 });
 
 describe("month champions and highlights", () => {
@@ -128,16 +150,6 @@ describe("month champions and highlights", () => {
     const hl = highlights(d, 14);
     expect(hl.find((h) => h.key === "hot")).toMatchObject({ playerId: "a" });
     expect(hl.find((h) => h.key === "busiest")).toMatchObject({ playerId: "a" });
-  });
-
-  test("daysUntil counts in the club's calendar, whatever the machine's time zone", () => {
-    // "Today" is the club's day (Berlin), not the test machine's: late in the evening they differ in Auckland.
-    const today = localDay();
-    const [y, m, d] = today.split("-").map(Number);
-    const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-    expect(daysUntil(today)).toBe(0);
-    expect(daysUntil(tomorrow)).toBe(1);
-    expect(daysUntil("")).toBeNull();
   });
 });
 

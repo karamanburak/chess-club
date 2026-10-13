@@ -2,7 +2,7 @@ import Link from "next/link";
 import { localPath } from "@/lib/safe-path";
 import { redirect } from "next/navigation";
 import { readDb } from "@/lib/db";
-import { currentPlayerId } from "@/lib/auth";
+import { currentPlayerId, deviceKey } from "@/lib/auth";
 import { getT } from "@/lib/lang";
 import { fmt } from "@/lib/i18n";
 import { claimWithPin, registerSelf, skipIdentity } from "@/lib/actions";
@@ -31,7 +31,7 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
 
   if (chosen) {
     const firstTime = !chosen.pinHash;
-    const locked = pinLocked(chosen);
+    const locked = pinLocked(chosen, undefined, await deviceKey());
     return (
       <div className="max-w-md mx-auto">
         <PageHeader
@@ -114,23 +114,23 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
             ) : (
               <form action={registerSelf} className="flex flex-col gap-3">
                 <div>
-                  <label className="label" htmlFor="name">
+                  <label className="label" htmlFor="f-me-new-name">
                     {t.me.yourName}
                   </label>
-                  <input id="name" name="name" required minLength={2} className="w-full" placeholder={t.me.namePlaceholder} autoComplete="off" />
+                  <input id="f-me-new-name" name="name" required minLength={2} className="w-full" placeholder={t.me.namePlaceholder} autoComplete="off" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="label" htmlFor="pin">
+                    <label className="label" htmlFor="f-me-new-pin">
                       {t.me.pin4}
                     </label>
-                    <input id="pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                    <input id="f-me-new-pin" name="pin" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                   </div>
                   <div>
-                    <label className="label" htmlFor="confirm">
+                    <label className="label" htmlFor="f-me-new-confirm">
                       {t.me.repeat}
                     </label>
-                    <input id="confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
+                    <input id="f-me-new-confirm" name="confirm" type="password" inputMode="numeric" pattern="\d{4}" maxLength={4} required autoComplete="off" className="w-full font-mono text-center tracking-widest" />
                   </div>
                 </div>
                 <p className="text-xs text-muted">{fmt(t.me.startHint, { rating: db.settings.startRating })}</p>

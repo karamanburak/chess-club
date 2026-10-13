@@ -1,6 +1,6 @@
 import { fmt, plural, type Dict } from "./i18n";
 import type { IconName } from "@/components/icons";
-import { dayOf, daysFromToday, localDay } from "./time";
+import { dayOf, localDay } from "./time";
 /**
  * The "club life" layer: titles by rating band, achievements, seasons with
  * their own table and champion, tournament winners and home-page highlights.
@@ -9,7 +9,7 @@ import { dayOf, daysFromToday, localDay } from "./time";
  */
 import type { Database, Game, Player, Season, Tournament } from "./types";
 import { countsForRating } from "./elo";
-import { knockoutPlacement, monthsWithGames, monthTable, playerScore, standings, streaks } from "./queries";
+import { completedGamesByPlayer, countedGamesByMonth, knockoutPlacement, monthRows, playerScore, standings, streaks } from "./queries";
 
 /* ------------------------------------------------------------------ */
 /* Titles                                                              */
@@ -20,18 +20,18 @@ export interface Title {
   label: string;
   short: string;
   min: number;
-  icon: string;
+  icon: IconName;
 }
 
 /** Club titles are held from TITLE_GAMES games onwards and follow the current rating. */
 export const TITLE_GAMES = 10;
 
 export const TITLES: readonly Title[] = [
-  { key: "novice", label: "Novice", short: "N", min: 0, icon: "♙" },
-  { key: "club", label: "Club Player", short: "CP", min: 1100, icon: "♘" },
-  { key: "expert", label: "Club Expert", short: "CE", min: 1300, icon: "♗" },
-  { key: "master", label: "Club Master", short: "CM", min: 1500, icon: "♖" },
-  { key: "grandmaster", label: "Club Grandmaster", short: "CGM", min: 1700, icon: "♕" },
+  { key: "novice", label: "Novice", short: "N", min: 0, icon: "pawn" },
+  { key: "club", label: "Club Player", short: "CP", min: 1100, icon: "knight" },
+  { key: "expert", label: "Club Expert", short: "CE", min: 1300, icon: "bishop" },
+  { key: "master", label: "Club Master", short: "CM", min: 1500, icon: "rook" },
+  { key: "grandmaster", label: "Club Grandmaster", short: "CGM", min: 1700, icon: "queen" },
 ];
 
 export function titleFor(p: { rating: number; gamesPlayed: number }): Title | null {
@@ -62,25 +62,25 @@ export interface AchievementDef {
   key: string;
   label: string;
   description: string;
-  icon: string;
+  icon: IconName;
 }
 
 export const ACHIEVEMENTS: readonly AchievementDef[] = [
-  { key: "first-win", label: "First Blood", description: "Won a game.", icon: "🩸" },
-  { key: "games-10", label: "Regular", description: "Played 10 games.", icon: "🎟️" },
-  { key: "games-50", label: "Veteran", description: "Played 50 games.", icon: "🎖️" },
-  { key: "games-100", label: "Centurion", description: "Played 100 games.", icon: "💯" },
-  { key: "streak-3", label: "Hat-trick", description: "Three wins in a row.", icon: "🎩" },
-  { key: "streak-5", label: "On Fire", description: "Five wins in a row.", icon: "🔥" },
-  { key: "giant-slayer", label: "Giant Slayer", description: "Beat someone rated 200+ points higher.", icon: "🗡️" },
-  { key: "comeback", label: "Comeback", description: "Won right after three straight losses.", icon: "🦅" },
-  { key: "draw-artist", label: "Draw Artist", description: "Ten draws. Peace was always an option.", icon: "🕊️" },
-  { key: "perfect-night", label: "Perfect Night", description: "Won every board of a club night with at least three games.", icon: "🌙" },
-  { key: "night-owl", label: "Night Owl", description: "Played five or more games in one club night.", icon: "🦉" },
-  { key: "regular-face", label: "Familiar Face", description: "Showed up to ten club nights.", icon: "☕" },
-  { key: "climber", label: "Climber", description: "Gained 100 rating points since joining.", icon: "🧗" },
-  { key: "tournament-winner", label: "Tournament Winner", description: "Finished first in a tournament.", icon: "🏆" },
-  { key: "season-champion", label: "Season Champion", description: "Topped the table of a whole season.", icon: "👑" },
+  { key: "first-win", label: "First Blood", description: "Won a game.", icon: "star" },
+  { key: "games-10", label: "Regular", description: "Played 10 games.", icon: "ticket" },
+  { key: "games-50", label: "Veteran", description: "Played 50 games.", icon: "medal" },
+  { key: "games-100", label: "Centurion", description: "Played 100 games.", icon: "gem" },
+  { key: "streak-3", label: "Hat-trick", description: "Three wins in a row.", icon: "hat" },
+  { key: "streak-5", label: "On Fire", description: "Five wins in a row.", icon: "flame" },
+  { key: "giant-slayer", label: "Giant Slayer", description: "Beat someone rated 200+ points higher.", icon: "sword" },
+  { key: "comeback", label: "Comeback", description: "Won right after three straight losses.", icon: "refresh" },
+  { key: "draw-artist", label: "Draw Artist", description: "Ten draws. Peace was always an option.", icon: "scale" },
+  { key: "perfect-night", label: "Perfect Night", description: "Won every board of a club night with at least three games.", icon: "moon" },
+  { key: "night-owl", label: "Night Owl", description: "Played five or more games in one club night.", icon: "owl" },
+  { key: "regular-face", label: "Familiar Face", description: "Showed up to ten club nights.", icon: "coffee" },
+  { key: "climber", label: "Climber", description: "Gained 100 rating points since joining.", icon: "trend" },
+  { key: "tournament-winner", label: "Tournament Winner", description: "Finished first in a tournament.", icon: "trophy" },
+  { key: "season-champion", label: "Season Champion", description: "Topped the table of a whole season.", icon: "crown" },
 ];
 
 export interface Achievement extends AchievementDef {
@@ -152,7 +152,7 @@ export function achievements(db: Database, playerId: string): Achievement[] {
   }
 
   for (const w of tournamentWinners(db)) if (w.playerId === playerId) mark("tournament-winner", `${w.tournament.date}T23:59:59.000Z`);
-  for (const s of db.seasons) if (s.championId === playerId && s.end) mark("season-champion", `${s.end}T23:59:59.000Z`);
+  for (const s of db.seasons) if (s.end && seasonChampion(db, s) === playerId) mark("season-champion", `${s.end}T23:59:59.000Z`);
 
   return ACHIEVEMENTS.map((a) => ({ ...a, earnedAt: earned.get(a.key) ?? null }));
 }
@@ -199,12 +199,37 @@ export function tournamentWinner(db: Database, t: Tournament): TournamentWinner 
   return { tournament: t, playerId: table[0].playerId, runnerUpId: table[1]?.playerId ?? null };
 }
 
-/** Newest first. */
+/**
+ * What tournamentWinners() depends on, as a cheap string: the tournaments' shape, their games' results and the
+ * ratings (the last standings tiebreak). Linear in the data, far cheaper than the standings themselves.
+ */
+function winnersFingerprint(db: Database): string {
+  const parts: string[] = [String(db.games.length)];
+  for (const t of db.tournaments) {
+    parts.push(t.id, t.status, t.date, String(t.rounds.length), t.withdrawnIds.join(","), t.tiebreaks.join(","));
+    if (t.knockout) parts.push(t.knockout.matches.map((m) => m.winnerId ?? "-").join(","));
+  }
+  for (const g of db.games) if (g.tournamentId) parts.push(g.result ?? "-");
+  for (const p of db.players) parts.push(String(p.rating));
+  return parts.join("|");
+}
+
+const winnersMemo = new WeakMap<Database, { key: string; value: TournamentWinner[] }>();
+
+/**
+ * Newest first. Memoised per database object (pages ask once per player via achievements() and seasonTable());
+ * the fingerprint check keeps it right when the same object is changed inside a mutate() and read again.
+ */
 export function tournamentWinners(db: Database): TournamentWinner[] {
-  return db.tournaments
+  const key = winnersFingerprint(db);
+  const hit = winnersMemo.get(db);
+  if (hit && hit.key === key) return hit.value;
+  const value = db.tournaments
     .map((t) => tournamentWinner(db, t))
     .filter((w): w is TournamentWinner => w !== null)
     .sort((a, b) => b.tournament.date.localeCompare(a.tournament.date));
+  winnersMemo.set(db, { key, value });
+  return value;
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,6 +316,16 @@ export function seasonTable(db: Database, season: Season): SeasonRow[] {
   return [...rows.values()].sort((a, b) => b.points - a.points || b.wins - a.wins || b.ratingChange - a.ratingChange);
 }
 
+/**
+ * The champion of a closed season: the top of its table, derived like everything else so a backdated game or a
+ * corrected result moves the crown too. Null while the season is open or when nobody played in it. The stored
+ * `Season.championId` is only what closeSeason saw at the time; read this instead.
+ */
+export function seasonChampion(db: Database, season: Season): string | null {
+  if (!season.end) return null;
+  return seasonTable(db, season)[0]?.playerId ?? null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Monthly champions                                                   */
 /* ------------------------------------------------------------------ */
@@ -305,8 +340,9 @@ export interface MonthChampion {
 /** Best of each month with at least MIN games. Newest first. */
 export function monthChampions(db: Database, minGames = 3): MonthChampion[] {
   const out: MonthChampion[] = [];
-  for (const month of monthsWithGames(db)) {
-    const top = monthTable(db, month).find((r) => r.games >= minGames);
+  const byMonth = countedGamesByMonth(db); // each game's club month worked out once
+  for (const month of [...byMonth.keys()].sort().reverse()) {
+    const top = monthRows(byMonth.get(month)!).find((r) => r.games >= minGames);
     if (top) out.push({ month, playerId: top.playerId, points: top.points, games: top.games });
   }
   return out;
@@ -359,9 +395,10 @@ export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"
     out.push({ key: "upset", icon: "bolt", title: m.upsetTitle, text: fmt(m.upsetText, { winner: name(upset.winner), loser: name(upset.loser), diff: upset.diff }), playerId: upset.winner, gameId: upset.g.id });
   }
   let hot: { id: string; length: number } | null = null;
+  const byPlayer = completedGamesByPlayer(db); // one sort for everyone
   for (const p of db.players) {
     if (!p.active) continue;
-    const s = streaks(db, p.id).current;
+    const s = streaks(db, p.id, byPlayer.get(p.id) ?? []).current;
     if (s && s.kind === "W" && s.length >= 3 && (!hot || s.length > hot.length)) hot = { id: p.id, length: s.length };
   }
   if (hot) out.push({ key: "hot", icon: "flame", title: m.hotTitle, text: fmt(m.hotText, { name: name(hot.id), n: hot.length }), playerId: hot.id });
@@ -387,7 +424,3 @@ export function highlights(db: Database, days = 14, m: Dict["club"]["highlights"
   return out.slice(0, 5);
 }
 
-/** Days until an ISO date (negative when past), or null when empty. */
-export function daysUntil(iso: string): number | null {
-  return daysFromToday(iso);
-}

@@ -8,6 +8,8 @@ const en = {
     master: "Club Master",
     grandmaster: "Club Grandmaster",
   },
+  /** Compact codes for leaderboard rows. */
+  titleShort: { novice: "N", club: "CP", expert: "CE", master: "CM", grandmaster: "CGM" },
   achievements: {
     "first-win": { label: "First Blood", description: "Won a game." },
     "games-10": { label: "Regular", description: "Played 10 games." },
@@ -49,6 +51,7 @@ const de: typeof en = {
     master: "Vereinsmeister",
     grandmaster: "Vereinsgroßmeister",
   },
+  titleShort: { novice: "N", club: "VS", expert: "VE", master: "VM", grandmaster: "VGM" },
   achievements: {
     "first-win": { label: "Erstes Blut", description: "Eine Partie gewonnen." },
     "games-10": { label: "Stammgast", description: "10 Partien gespielt." },

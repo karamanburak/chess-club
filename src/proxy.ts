@@ -8,7 +8,11 @@ import { ADMIN_COOKIE, hasClubAccess, ME_COOKIE, MEMBER_COOKIE, SKIP_COOKIE } fr
  * admin) cookie; everyone else is sent to /join. Without a code this is a
  * pass-through, so nothing changes for a club on its own Wi-Fi.
  */
+/** The join screen and the admin sign-in must open without any cookie (exact paths, not every path that starts so). */
+const OPEN_PATHS = /^\/(join|admin)(\/|$)/;
+
 export async function proxy(req: NextRequest) {
+  if (OPEN_PATHS.test(req.nextUrl.pathname)) return NextResponse.next();
   const db = await readDb();
   const here = req.nextUrl.pathname + req.nextUrl.search;
   const to = (pathname: string) => {
@@ -36,6 +40,6 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Static app assets (manifest, icons) must load without any cookie, otherwise "add to home screen" breaks.
-  matcher: ["/((?!_next/|favicon.ico|manifest.webmanifest|icons/|join|admin|api/).*)"],
+  // Static app assets (manifest, icons, the push service worker) must load without any cookie, otherwise "add to home screen" breaks.
+  matcher: ["/((?!_next/|favicon.ico|manifest.webmanifest|sw.js|icons/|api/).*)"],
 };

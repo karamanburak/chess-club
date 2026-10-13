@@ -84,7 +84,7 @@ export default async function TournamentsPage() {
               <label htmlFor="f-tournaments-form-name" className="label">{msg.tournaments.form.name}</label>
               <input id="f-tournaments-form-name" name="name" required className="w-full" placeholder={msg.tournaments.form.namePlaceholder} autoComplete="off" />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div>
                 <label htmlFor="f-tournaments-form-date" className="label">{msg.tournaments.form.date}</label>
                 <input id="f-tournaments-form-date" name="date" type="date" defaultValue={localDay()} className="w-full" />
@@ -106,8 +106,8 @@ export default async function TournamentsPage() {
                 </datalist>
               </div>
             </div>
-            <div>
-              <label className="label">{msg.tournaments.form.format}</label>
+            <fieldset>
+              <legend className="label">{msg.tournaments.form.format}</legend>
               <div className="grid grid-cols-1 gap-2">
                 {modes.map((m, i) => (
                   <label key={m.value} className="chip items-start">
@@ -120,7 +120,7 @@ export default async function TournamentsPage() {
                 ))}
               </div>
               <p className="text-xs text-muted mt-1.5">{msg.tournaments.form.formatHint}</p>
-            </div>
+            </fieldset>
             {/* Only meaningful for a knockout; shown by CSS as soon as that radio is picked, no client JS needed. */}
             <fieldset className={`hidden [form:has(input[name=pairingMode][value=knockout]:checked)_&]:flex flex-col gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3`}>
               <legend className="label px-1">{msg.tournaments.form.knockoutOptions}</legend>
@@ -158,8 +158,8 @@ export default async function TournamentsPage() {
               <input type="checkbox" name="rated" value="on" defaultChecked /> {msg.tournaments.form.ratedElo}
             </label>
             <input type="hidden" name="rated" value="off" />
-            <div>
-              <label className="label">{msg.tournaments.form.participants}</label>
+            <fieldset>
+              <legend className="label">{msg.tournaments.form.participants}</legend>
               {players.length === 0 ? (
                 <p className="text-sm text-muted">{msg.tournaments.form.noActivePlayers}</p>
               ) : (
@@ -173,7 +173,7 @@ export default async function TournamentsPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </fieldset>
             <SubmitButton pendingText={msg.tournaments.form.creating}>{msg.tournaments.form.create}</SubmitButton>
           </form>
         </Section>

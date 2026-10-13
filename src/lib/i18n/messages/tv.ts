@@ -9,6 +9,8 @@ const en = {
   live: "Live · refreshes every 5 seconds",
   back: "Back to the club →",
   gamesN: "{n} games",
+  /** Between two names on a board without a result yet. */
+  vs: "vs",
 };
 const de: typeof en = {
   present: "{n} anwesend",
@@ -20,5 +22,6 @@ const de: typeof en = {
   live: "Live · aktualisiert alle 5 Sekunden",
   back: "Zurück zum Verein →",
   gamesN: "{n} Partien",
+  vs: "gegen",
 };
 export const tv = { en, de };

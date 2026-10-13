@@ -2,7 +2,9 @@ import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { getT } from "@/lib/lang";
 import { fmt, type Dict } from "@/lib/i18n";
-import { currentSeason, daysUntil, seasonTable } from "@/lib/club";
+import { currentSeason, seasonTable } from "@/lib/club";
+import { nameOf, resultLabel } from "@/lib/score";
+import { daysFromToday } from "@/lib/time";
 import { activeSession, leaderboard, playerMap, sessionSummary, standings } from "@/lib/queries";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { FaceSvg } from "@/components/Face";
@@ -26,7 +28,7 @@ export default async function TvPage() {
   const night = activeSession(db);
   const running = db.tournaments.filter((t) => t.status === "running" && t.rounds.length).sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
   const season = currentSeason(db);
-  const next = daysUntil(club.nextNight);
+  const next = daysFromToday(club.nextNight);
 
   return (
     <div className="min-h-screen flex flex-col px-8 py-6 gap-6 text-lg">
@@ -74,7 +76,7 @@ function NightView({ db, names, games, night, t }: { db: Database; names: Map<st
         <h2 className="font-display text-3xl font-semibold">
           {fmt(t.common.roundN, { n: round?.number ?? 1 })} <span className="text-muted text-xl font-sans font-normal">· {fmt(t.tv.present, { n: night.presentIds.length })}</span>
         </h2>
-        {round ? <Boards round={round} names={names} games={games} sitsOut={t.common.sitsOut} /> : <p className="text-muted">{t.tv.waiting}</p>}
+        {round ? <Boards round={round} names={names} games={games} t={t} /> : <p className="text-muted">{t.tv.waiting}</p>}
       </section>
       <section className="card p-6 flex flex-col gap-3">
         <h2 className="font-display text-2xl font-semibold">{t.tv.tonight}</h2>
@@ -86,7 +88,7 @@ function NightView({ db, names, games, night, t }: { db: Database; names: Map<st
                 <td>
                   <span className="flex items-center gap-3">
                     <FaceSvg seed={names.get(r.playerId)?.avatar ?? r.playerId} className="h-9 w-9 rounded-full" />
-                    {names.get(r.playerId)?.name ?? "?"}
+                    {nameOf(names, r.playerId)}
                   </span>
                 </td>
                 <td className="text-right font-mono text-accent">{r.points}</td>
@@ -111,7 +113,7 @@ function TournamentView({ db, names, games, tournament, t }: { db: Database; nam
         <h2 className="font-display text-3xl font-semibold">
           {tournament.name} <span className="text-muted text-xl font-sans font-normal">· {fmt(t.common.roundNofTotal, { n: round.number, total: tournament.plannedRounds })}</span>
         </h2>
-        <Boards round={round} names={names} games={games} sitsOut={t.common.sitsOut} />
+        <Boards round={round} names={names} games={games} t={t} />
       </section>
       <section className="card p-6 flex flex-col gap-3">
         <h2 className="font-display text-2xl font-semibold">{t.tv.standings}</h2>
@@ -183,7 +185,7 @@ function IdleView({ db, names, nextNight, t }: { db: Database; names: Map<string
                 {table.map((r, i) => (
                   <tr key={r.playerId}>
                     <td className="w-10 font-mono text-muted">{i + 1}</td>
-                    <td>{names.get(r.playerId)?.name ?? "?"}</td>
+                    <td>{nameOf(names, r.playerId)}</td>
                     <td className="text-right font-mono text-accent">{fmt(t.common.pointsN, { n: r.points })}</td>
                   </tr>
                 ))}
@@ -202,8 +204,8 @@ function IdleView({ db, names, nextNight, t }: { db: Database; names: Map<string
   );
 }
 
-function Boards({ round, names, games, sitsOut }: { round: Round | SessionRound; names: Map<string, Player>; games: Map<string, Game>; sitsOut: string }) {
-  const label = (r: Game["result"]) => (r === null ? "" : r === "1/2-1/2" ? "½–½" : r.replace("-", "–"));
+function Boards({ round, names, games, t }: { round: Round | SessionRound; names: Map<string, Player>; games: Map<string, Game>; t: Dict }) {
+  const sitsOut = t.common.sitsOut;
   return (
     <div className="grid gap-4 md:grid-cols-2 content-start">
       {round.pairings
@@ -216,9 +218,9 @@ function Boards({ round, names, games, sitsOut }: { round: Round | SessionRound;
           return (
             <div key={p.gameId} className={`card p-5 flex items-center gap-4 ${res ? "border-win/30" : "border-accent/40"}`}>
               <span className="font-mono text-muted text-xl w-8 shrink-0">{p.board}</span>
-              <Side seat={names.get(p.whiteId)} color="white" won={whiteWon} dim={blackWon} />
-              <span className={`font-mono text-2xl shrink-0 w-20 text-center ${res ? "text-fg" : "text-muted"}`}>{res ? label(res) : "vs"}</span>
-              <Side seat={names.get(p.blackId)} color="black" won={blackWon} dim={whiteWon} align="right" />
+              <Side seat={names.get(p.whiteId)} colorLabel={t.common.plays.white} color="white" won={whiteWon} dim={blackWon} />
+              <span className={`font-mono text-2xl shrink-0 w-20 text-center ${res ? "text-fg" : "text-muted"}`}>{res ? resultLabel(res) : t.tv.vs}</span>
+              <Side seat={names.get(p.blackId)} colorLabel={t.common.plays.black} color="black" won={blackWon} dim={whiteWon} align="right" />
             </div>
           );
         })}
@@ -226,7 +228,7 @@ function Boards({ round, names, games, sitsOut }: { round: Round | SessionRound;
         <div className="card p-5 border-dashed flex items-center gap-4 text-muted">
           <FaceSvg seed={names.get(round.byePlayerId)?.avatar ?? round.byePlayerId} className="h-12 w-12 rounded-full" />
           <span className="text-xl">
-            <span className="text-fg font-medium">{names.get(round.byePlayerId)?.name ?? "?"}</span> {sitsOut}
+            <span className="text-fg font-medium">{nameOf(names, round.byePlayerId)}</span> {sitsOut}
           </span>
         </div>
       )}
@@ -234,12 +236,12 @@ function Boards({ round, names, games, sitsOut }: { round: Round | SessionRound;
   );
 }
 
-function Side({ seat, color, won, dim, align = "left" }: { seat: Player | undefined; color: "white" | "black"; won: boolean; dim: boolean; align?: "left" | "right" }) {
+function Side({ seat, color, colorLabel, won, dim, align = "left" }: { seat: Player | undefined; color: "white" | "black"; colorLabel: string; won: boolean; dim: boolean; align?: "left" | "right" }) {
   return (
     <span className={`flex items-center gap-3 min-w-0 flex-1 ${align === "right" ? "flex-row-reverse text-right" : ""} ${dim ? "opacity-50" : ""}`}>
       <span className="relative shrink-0">
         <FaceSvg seed={seat?.avatar ?? "?"} className="h-12 w-12 rounded-full" />
-        <span className={`absolute -bottom-0.5 ${align === "right" ? "-left-0.5" : "-right-0.5"} h-4 w-4 rounded-full border border-line ${color === "white" ? "bg-white" : "bg-black"}`} />
+        <span className={`absolute -bottom-0.5 ${align === "right" ? "-left-0.5" : "-right-0.5"} h-4 w-4 rounded-full border border-line ${color === "white" ? "bg-white" : "bg-black"}`} role="img" aria-label={colorLabel} />
       </span>
       <span className={`truncate text-xl ${won ? "font-semibold" : ""}`}>{seat?.name ?? "?"}</span>
     </span>

@@ -10,9 +10,12 @@ export function expectedScore(rating: number, opponent: number): number {
   return 1 / (1 + Math.pow(10, (opponent - rating) / 400));
 }
 
-/** FIDE-like K factor: new players move fast, strong players move slowly. */
-export function kFactor(player: { gamesPlayed: number; rating: number }): number {
-  if (player.gamesPlayed < 30) return 40;
+/**
+ * FIDE-like K factor: new players move fast, strong players move slowly. "New" counts rated games only
+ * (`ratedGames`, filled by recomputeRatings); `gamesPlayed` is the fallback for records that predate it.
+ */
+export function kFactor(player: { gamesPlayed: number; ratedGames?: number; rating: number }): number {
+  if ((player.ratedGames ?? player.gamesPlayed) < 30) return 40;
   if (player.rating >= 2400) return 10;
   return 20;
 }
@@ -50,6 +53,7 @@ export function recomputeRatings(db: Database): void {
   for (const p of db.players) {
     p.rating = p.initialRating;
     p.gamesPlayed = 0;
+    p.ratedGames = 0;
     p.wins = 0;
     p.draws = 0;
     p.losses = 0;
@@ -87,6 +91,8 @@ export function recomputeRatings(db: Database): void {
       const newBlack = Math.round(black.rating + kb * (sb - eb));
       white.rating = newWhite;
       black.rating = newBlack;
+      white.ratedGames = (white.ratedGames ?? 0) + 1;
+      black.ratedGames = (black.ratedGames ?? 0) + 1;
     }
 
     g.whiteRatingAfter = white.rating;
