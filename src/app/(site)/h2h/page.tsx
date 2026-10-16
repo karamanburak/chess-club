@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { flippedResultLabel } from "@/lib/score";
 import { readDb } from "@/lib/db";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
 import { formatDateTime, headToHead, leaderboard, playerMap, resultLabel } from "@/lib/queries";
+import { StatsTabs } from "@/components/StatsTabs";
 import { Avatar, ColorDot, Empty, PageHeader, PlayerLink, Section } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,7 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
 
   return (
     <>
+      <StatsTabs active="h2h" />
       <PageHeader eyebrow={t.players.h2h.eyebrow} title={t.players.h2h.title} subtitle={<span>{t.players.h2h.subtitle}</span>} />
 
       <form method="get" className="card flex flex-wrap items-end gap-3 mb-6">
@@ -128,7 +131,7 @@ export default async function H2HPage({ searchParams }: PageProps<"/h2h">) {
                             <ColorDot color={aWhite ? "white" : "black"} /> {aWhite ? g.whiteRatingBefore : g.blackRatingBefore}
                           </span>
                         </td>
-                        <td className="text-center font-mono">{aWhite ? resultLabel(g.result) : resultLabel(g.result).split("").reverse().join("")}</td>
+                        <td className="text-center font-mono">{aWhite ? resultLabel(g.result) : flippedResultLabel(g.result)}</td>
                         <td className={sa === 0 ? "font-semibold text-win" : sa === 1 ? "text-muted" : ""}>
                           <span className="inline-flex items-center gap-2">
                             <ColorDot color={aWhite ? "black" : "white"} /> {aWhite ? g.blackRatingBefore : g.whiteRatingBefore}
