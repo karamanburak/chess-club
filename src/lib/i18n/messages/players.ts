@@ -54,8 +54,8 @@ const en = {
   },
   /** Web Push on the player's own profile (PushToggle). */
   push: {
-    title: "Notifications on this phone",
-    hint: "Get a notification when someone challenges you, answers, proposes another time or records a result. Only your own games, nothing else.",
+    title: "Notifications on this device",
+    hint: "Get a notification when someone challenges you, answers, proposes another time or records a result. Only your own games, nothing else. Turn it on separately on every phone and computer you want them on.",
     on: "Turn on",
     off: "Turn off",
     isOn: "On for this device.",
@@ -204,8 +204,8 @@ const de: typeof en = {
     joining: "Beitreten…",
   },
   push: {
-    title: "Benachrichtigungen auf diesem Handy",
-    hint: "Werde benachrichtigt, wenn dich jemand herausfordert, antwortet, eine andere Zeit vorschlägt oder ein Ergebnis einträgt. Nur deine eigenen Partien, sonst nichts.",
+    title: "Benachrichtigungen auf diesem Gerät",
+    hint: "Werde benachrichtigt, wenn dich jemand herausfordert, antwortet, eine andere Zeit vorschlägt oder ein Ergebnis einträgt. Nur deine eigenen Partien, sonst nichts. Schalte sie auf jedem Handy und Computer, auf dem du sie willst, einzeln ein.",
     on: "Einschalten",
     off: "Ausschalten",
     isOn: "Auf diesem Gerät eingeschaltet.",

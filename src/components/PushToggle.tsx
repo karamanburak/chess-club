@@ -17,7 +17,8 @@ function keyBytes(base64url: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * "Notifications on this phone" on the player's own profile. Registers public/sw.js, asks the browser for
+ * "Notifications on this device" on the player's own profile, one subscription per browser. Once on, the card shrinks
+ * to the status line. Registers public/sw.js, asks the browser for
  * permission only on a tap, and stores the subscription on the player (savePushSubscription). On an iPhone, push
  * works only for the club opened from the home screen, so Safari in a tab gets that hint instead of a button.
  */
@@ -95,7 +96,7 @@ export function PushToggle({ publicKey }: { publicKey: string }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-muted -mt-1">{m.hint}</p>
+      {state !== "on" && <p className="text-xs text-muted -mt-1">{m.hint}</p>}
       {state === "ios" && <p className="text-sm">{m.ios}</p>}
       {state === "unsupported" && <p className="text-sm text-muted">{m.unsupported}</p>}
       {state === "denied" && <p className="text-sm text-loss">{m.denied}</p>}
