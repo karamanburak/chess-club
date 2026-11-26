@@ -9,6 +9,10 @@ export interface TournamentView {
   games: Map<string, Game>;
   last: Tournament["rounds"][number] | null;
   lastComplete: boolean;
+  /** Boards of the current round still without a result. */
+  playing: number;
+  /** Knockout matches of the current round without a winner yet. */
+  koUndecided: number;
   roundsLeft: number;
   activeCount: number;
   isKO: boolean;
@@ -40,13 +44,18 @@ export function tournamentView(db: Database, t: Tournament, names: Map<string, P
         !(m.a && t.withdrawnIds.includes(m.a)) &&
         !(m.b && t.withdrawnIds.includes(m.b)),
     );
+  const games = new Map(db.games.map((g) => [g.id, g]));
+  const playing = last ? last.pairings.filter((p) => !games.get(p.gameId)?.result).length : 0;
+  const koUndecided = isKO && last ? (t.knockout?.matches ?? []).filter((m) => m.round === last.number && !m.winnerId).length : 0;
   const canGenerate = t.status !== "finished" && lastComplete && roundsLeft > 0 && activeCount >= 2 && !koBlocked;
   return {
     t,
     names,
-    games: new Map(db.games.map((g) => [g.id, g])),
+    games,
     last,
     lastComplete,
+    playing,
+    koUndecided,
     roundsLeft,
     activeCount,
     isKO,

@@ -77,6 +77,7 @@ export default async function TournamentPage({ params, searchParams }: PageProps
           admin={admin}
           member={member}
           msg={msg}
+          lang={lang}
         />
 
         <div className="col-stack">

@@ -48,6 +48,7 @@ import { puzzleOfTheDay } from "./puzzles";
 import { isSolution } from "./puzzle-stats";
 import { requestOrigin } from "./request-url";
 import { dayOf, localDay, localStamp, zonedToUtc } from "./time";
+import { carrySchedules, cleanDay, PLACE_MAX, schedulableIn } from "./schedule";
 import { currentSeason, seasonTable } from "./club";
 import type { Challenge, Database, Game, GameResult, PairingMode, TiebreakKey, Tournament } from "./types";
 
@@ -258,6 +259,22 @@ function tellPlayers(db: Database, c: Challenge, text: (m: Dict["challenges"]["p
     if (playerId === who.me) continue;
     const other = playerId === c.fromId ? c.toId : c.fromId;
     who.push.push({ playerId, title: db.settings.club.name, body: text(m.push, { by: nameOf(db, other), details, when }), url: "/challenges", from: db });
+  }
+}
+
+/**
+ * Tells the two players of tournament game `g` on their own phones (Web Push) that its time changed, except whoever
+ * changed it. Same switches and language as tellPlayers(); `opponent` is the other side's name.
+ */
+function tellBoard(db: Database, g: Game, t: Tournament, text: (m: Dict["tournaments"]["schedule"]["push"], f: { opponent: string; tournament: string; details: string }) => string): void {
+  const who = actor.getStore();
+  if (!who || db.settings.pushOff || !pushKeys()) return;
+  const lang = pickLang(db.settings.language);
+  const details = [g.scheduledAt ? formatDateTime(g.scheduledAt, lang) : "", g.place ?? ""].filter(Boolean).join(" · ");
+  for (const playerId of [g.whiteId, g.blackId]) {
+    if (playerId === who.me) continue;
+    const opponent = nameOf(db, playerId === g.whiteId ? g.blackId : g.whiteId);
+    who.push.push({ playerId, title: db.settings.club.name, body: text(dicts[lang].tournaments.schedule.push, { opponent, tournament: t.name, details }), url: `/tournaments/${t.id}`, from: db });
   }
 }
 
@@ -1097,10 +1114,12 @@ export async function resetPin(id: string, fd: FormData) {
   });
 }
 
+/** "Sign out" on the player's own profile: this device forgets who it is and lands on the picker; PIN and player stay. */
 export async function unclaimProfile() {
   return run(async () => {
     await clearMeCookie();
     revalidateAll();
+    redirect("/me");
   });
 }
 
@@ -1807,14 +1826,84 @@ export async function updateRoundPairings(id: string, roundNumber: number, fd: F
       if (bye) use(bye);
 
       const oldGameIds = new Set(round.pairings.map((p) => p.gameId));
+      const oldGames = db.games.filter((g) => oldGameIds.has(g.id));
       db.games = db.games.filter((g) => !oldGameIds.has(g.id));
+      const newGames: Game[] = [];
       round.pairings = newPairs.map((p, i) => {
         const g = makeGame(db, { whiteId: p.whiteId, blackId: p.blackId, rated: t.rated, tournamentId: t.id, round: roundNumber, board: i + 1, sessionId: null });
         db.games.push(g);
+        newGames.push(g);
         return { board: i + 1, whiteId: p.whiteId, blackId: p.blackId, gameId: g.id };
       });
+      // Two players who stay on one board keep the time they agreed on.
+      carrySchedules(oldGames, newGames);
       round.byePlayerId = bye || null;
       log(db, `Tournament "${t.name}": boards of round ${roundNumber} edited by hand`);
+    });
+    revalidateAll();
+  });
+}
+
+/** The organiser's "play by" day for a round; an empty field removes it. */
+export async function setRoundDeadline(id: string, roundNumber: number, fd: FormData) {
+  return run(async () => {
+    await requireMember();
+    const E = await msgs();
+    const raw = str(fd, "deadline");
+    const day = raw ? cleanDay(raw) : null;
+    if (raw && !day) throw new UserError(E.deadlineInvalid);
+    await mutate((db) => {
+      const t = db.tournaments.find((x) => x.id === id);
+      const round = t?.rounds.find((r) => r.number === roundNumber);
+      if (!t || !round) return;
+      if (t.status === "finished") throw new UserError(E.tournamentFinished);
+      if ((round.deadline ?? null) === day) return;
+      if (day) round.deadline = day;
+      else delete round.deadline;
+      log(db, `Tournament "${t.name}": round ${roundNumber} ${day ? `to be played by ${day}` : "has no deadline any more"}`);
+    });
+    revalidateAll();
+  });
+}
+
+/**
+ * When and where the two players of a tournament board meet. One editable entry, no accept/decline: they agree
+ * among themselves and either of them (or the admin) writes it down; `mode` "clear" removes it again.
+ */
+export async function setGameSchedule(gameId: string, mode: "set" | "clear", fd: FormData) {
+  return run(async () => {
+    const E = await msgs();
+    const who = await whoActs();
+    const date = str(fd, "date");
+    const time = str(fd, "time");
+    const place = str(fd, "place").slice(0, PLACE_MAX);
+    let at: string | null = null;
+    if (mode === "set") {
+      if (!date || !time) throw new UserError(E.scheduleNeedsBoth);
+      at = zonedToUtc(date, time);
+      // Like a challenge: "right now" still passes, yesterday does not.
+      if (!at || new Date(at).getTime() < Date.now() - PAST_GRACE_MS) throw new UserError(E.challengePast);
+    }
+    await mutate((db) => {
+      const g = db.games.find((x) => x.id === gameId);
+      if (!g) return;
+      if (!mayEditGame(who, g)) throw new UserError(who.me ? E.scheduleNotYours : E.claimFirst);
+      const t = schedulableIn(db, g);
+      if (!t) throw new UserError(E.gameNotSchedulable);
+      if ((g.scheduledAt ?? null) === at && (at === null || (g.place ?? "") === place)) return;
+      const pair = `${nameOf(db, g.whiteId)} – ${nameOf(db, g.blackId)}`;
+      if (at) {
+        g.scheduledAt = at;
+        if (place) g.place = place;
+        else delete g.place;
+        log(db, `Tournament "${t.name}": round ${g.round}, ${pair} set for ${localStamp(at)}${place ? ` (${place})` : ""}`);
+        tellBoard(db, g, t, (m, f) => fmt(m.set, f));
+      } else {
+        delete g.scheduledAt;
+        delete g.place;
+        log(db, `Tournament "${t.name}": round ${g.round}, ${pair} has no time any more`);
+        tellBoard(db, g, t, (m, f) => fmt(m.cleared, f));
+      }
     });
     revalidateAll();
   });

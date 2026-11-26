@@ -302,17 +302,16 @@ export function calendarEvent(c: Challenge, names: { from: string; to: string; c
 
 const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 
-/** A minimal iCalendar file for one accepted game, so a phone calendar can remind both players. */
-export function toIcs(c: Challenge, names: { from: string; to: string; club: string }, m: CalendarMsgs = DEFAULT_CALENDAR_MSGS): string {
-  const ev = calendarEvent(c, names, m);
+/** A minimal iCalendar file for one calendar entry; `uid` must stay the same for the same game so a second download updates it. */
+export function eventIcs(ev: CalendarEvent, uid: string, stampedAt: Date): string {
   const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//chess-club//challenge//EN",
     "BEGIN:VEVENT",
-    `UID:challenge-${c.id}@chess-club`,
-    `DTSTAMP:${stamp(new Date(c.updatedAt))}`,
+    `UID:${uid}@chess-club`,
+    `DTSTAMP:${stamp(stampedAt)}`,
     `DTSTART:${stamp(ev.start)}`,
     `DTEND:${stamp(ev.end)}`,
     `SUMMARY:${esc(ev.title)}`,
@@ -325,10 +324,19 @@ export function toIcs(c: Challenge, names: { from: string; to: string; club: str
     .join("\r\n");
 }
 
-/** Google Calendar "add event" link for one agreed game; opens prefilled, the user saves it themselves. */
-export function googleCalendarUrl(c: Challenge, names: { from: string; to: string; club: string }, m: CalendarMsgs = DEFAULT_CALENDAR_MSGS): string {
-  const ev = calendarEvent(c, names, m);
+/** Google Calendar "add event" link for one calendar entry; opens prefilled, the user saves it themselves. */
+export function eventGoogleUrl(ev: CalendarEvent): string {
   const q = new URLSearchParams({ action: "TEMPLATE", text: ev.title, dates: `${stamp(ev.start)}/${stamp(ev.end)}`, details: ev.description });
   if (ev.location) q.set("location", ev.location);
   return `https://calendar.google.com/calendar/render?${q.toString()}`;
+}
+
+/** The calendar file for one accepted game, so a phone calendar can remind both players. */
+export function toIcs(c: Challenge, names: { from: string; to: string; club: string }, m: CalendarMsgs = DEFAULT_CALENDAR_MSGS): string {
+  return eventIcs(calendarEvent(c, names, m), `challenge-${c.id}`, new Date(c.updatedAt));
+}
+
+/** Google Calendar link for one agreed game. */
+export function googleCalendarUrl(c: Challenge, names: { from: string; to: string; club: string }, m: CalendarMsgs = DEFAULT_CALENDAR_MSGS): string {
+  return eventGoogleUrl(calendarEvent(c, names, m));
 }

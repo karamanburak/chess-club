@@ -59,6 +59,10 @@ export interface Game {
   blackRatingBefore: number | null;
   whiteRatingAfter: number | null;
   blackRatingAfter: number | null;
+  /** Tournament games only: the time the two players agreed to meet (ISO instant), while the game is unplayed. */
+  scheduledAt?: string | null;
+  /** Where they meet; goes with `scheduledAt`. */
+  place?: string;
 }
 
 export interface Pairing {
@@ -73,6 +77,8 @@ export interface Round {
   pairings: Pairing[];
   byePlayerId: string | null;
   createdAt: string;
+  /** "Play by" day of the round (club day, "YYYY-MM-DD"), set by the organiser when rounds spread over weeks. */
+  deadline?: string;
 }
 
 export type TournamentStatus = "planned" | "running" | "finished";

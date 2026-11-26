@@ -92,10 +92,22 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
         }
         subtitle={player.note ? <span>{player.note}</span> : undefined}
         actions={
-          rv[0] ? (
-            <Link href={`/h2h?a=${player.id}&b=${rv[0].opponentId}`} className="btn">
-              <Icon name="swords" className="h-4 w-4" /> {fmt(p.vs, { name: nameOf(names, rv[0].opponentId) })}
-            </Link>
+          rv[0] || isMe ? (
+            <>
+              {rv[0] && (
+                <Link href={`/h2h?a=${player.id}&b=${rv[0].opponentId}`} className="btn">
+                  <Icon name="swords" className="h-4 w-4" /> {fmt(p.vs, { name: nameOf(names, rv[0].opponentId) })}
+                </Link>
+              )}
+              {/* Ends "this is me" on this device only; the PIN and the player stay as they are. */}
+              {isMe && (
+                <form action={unclaimProfile}>
+                  <SubmitButton className="btn" pendingText="…" title={p.signOutHint}>
+                    <Icon name="exit" className="h-4 w-4" /> {p.signOut}
+                  </SubmitButton>
+                </form>
+              )}
+            </>
           ) : undefined
         }
       />
@@ -356,12 +368,6 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
                 </div>
                 <SubmitButton className="btn" pendingText={msg.common.saving}>
                   {p.changePin}
-                </SubmitButton>
-              </form>
-              <form action={unclaimProfile} className="mt-3 pt-3 border-t border-line text-xs text-muted flex items-center justify-between gap-3">
-                <span>{p.sharedDevice}</span>
-                <SubmitButton className="btn btn-sm btn-ghost" pendingText="…">
-                  {p.forgetDevice}
                 </SubmitButton>
               </form>
             </Section>

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { currentPlayerId, isAdmin } from "@/lib/auth";
+import { LiveNow } from "@/components/LiveNow";
 import { MyChallenges } from "@/components/MyChallenges";
 import { getT } from "@/lib/lang";
 import { fmt, plural } from "@/lib/i18n";
 import { currentSeason, highlights, seasonOverdue, titleFor } from "@/lib/club";
-import { activeSession, completedGames, completedGamesByPlayer, formatDateTime, leaderboard, playerMap, rankChanges, recentForm, ratingTrend, resultLabel, sessionRoundComplete, streaks } from "@/lib/queries";
+import { activeSession, completedGames, completedGamesByPlayer, formatDateTime, leaderboard, playerMap, rankChanges, recentForm, ratingTrend, resultLabel, streaks } from "@/lib/queries";
 import { Avatar, Empty, FormDots, Pager, PlayerLink, Provisional, Rank, RankMove, RatingDelta, Section, StatusBadge, StreakBadge, TitleBadge } from "@/components/ui";
 import { nameOf } from "@/lib/score";
 import { Icon, KnightMark } from "@/components/icons";
@@ -13,6 +14,7 @@ import { QuoteOfTheDay } from "@/components/QuoteOfTheDay";
 import { DailyPuzzle } from "@/components/DailyPuzzle";
 import { lichessPuzzleUrl, puzzleOfTheDay } from "@/lib/puzzles";
 import { upcoming } from "@/lib/challenges";
+import { scheduledGames } from "@/lib/schedule";
 import { daysFromToday, localDay } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -37,8 +39,6 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const open = db.tournaments.filter((t) => t.status !== "finished").sort((a, b) => b.date.localeCompare(a.date));
   const top = board[0];
   const night = activeSession(db);
-  const nightRound = night?.rounds[night.rounds.length - 1];
-  const nightPending = nightRound ? nightRound.pairings.filter((p) => !db.games.find((g) => g.id === p.gameId)?.result).length : 0;
   const moves = rankChanges(db);
   const byPlayer = completedGamesByPlayer(db);
   const pageHref = (n: number) => (n <= 1 ? "/" : `/?page=${n}`);
@@ -59,7 +59,16 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const mine = me ? db.players.find((p) => p.id === me) : undefined;
   const myRank = mine ? board.findIndex((p) => p.id === mine.id) + 1 : 0;
   const myTrend = mine ? ratingTrend(db, mine.id) : null;
-  const myNext = me ? upcoming(db, me)[0] : undefined;
+  // The next game with a date: an agreed challenge or a tournament board the two players scheduled, whichever is sooner.
+  const nextChallenge = me ? upcoming(db, me)[0] : undefined;
+  const nextBoard = me ? scheduledGames(db, me)[0] : undefined;
+  const boardFirst = !!nextBoard && (!nextChallenge || nextBoard.at < nextChallenge.at);
+  const myNext =
+    boardFirst && nextBoard
+      ? { opponent: nextBoard.game.whiteId === me ? nextBoard.game.blackId : nextBoard.game.whiteId, at: nextBoard.at, href: `/tournaments/${nextBoard.tournament.id}` }
+      : nextChallenge
+        ? { opponent: nextChallenge.fromId === me ? nextChallenge.toId : nextChallenge.fromId, at: nextChallenge.at, href: "/challenges" }
+        : undefined;
   const bottomCards = 1 + (showPuzzle ? 1 : 0) + (hl.length > 0 ? 1 : 0);
 
   return (
@@ -103,6 +112,8 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         {club.announcement && <div className="relative mt-4 rounded-xl border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm flex items-start gap-2"><Icon name="pin" className="h-4 w-4 mt-0.5 shrink-0 text-accent" /> <span>{club.announcement}</span></div>}
       </section>
 
+      <LiveNow db={db} me={me} t={t} lang={lang} />
+
       {mine ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <Link href={`/players/${mine.id}`} className="stat hover:border-accent/50 transition-colors">
@@ -131,13 +142,13 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               <FormDots results={recentForm(db, mine.id)} />
             </span>
           </div>
-          <Link href="/challenges" className="stat hover:border-accent/50 transition-colors">
+          <Link href={myNext?.href ?? "/challenges"} className="stat hover:border-accent/50 transition-colors">
             <span className="stat-label">{t.home.yourNext}</span>
             {myNext ? (
               <span className="flex items-center gap-2 min-w-0">
-                <Avatar id={myNext.fromId === me ? myNext.toId : myNext.fromId} name={nameOf(names, myNext.fromId === me ? myNext.toId : myNext.fromId)} size="sm" />
+                <Avatar id={myNext.opponent} name={nameOf(names, myNext.opponent)} size="sm" />
                 <span className="min-w-0">
-                  <span className="block truncate font-medium">{nameOf(names, myNext.fromId === me ? myNext.toId : myNext.fromId)}</span>
+                  <span className="block truncate font-medium">{nameOf(names, myNext.opponent)}</span>
                   <span className="block text-xs text-muted">{formatDateTime(myNext.at, lang)}</span>
                 </span>
               </span>
@@ -184,22 +195,6 @@ export default async function Home({ searchParams }: PageProps<"/">) {
       <div className="mb-6 empty:hidden">
         <MyChallenges db={db} me={me} admin={admin} t={t} lang={lang} />
       </div>
-      {night && nightRound && (
-        <Link href="/pairing" className="card mb-6 border-accent/40 hover:border-accent/70 transition-colors flex items-center gap-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
-            <Icon name="pawn" className="h-5 w-5" />
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="block font-semibold">{t.home.nightInProgress}</span>
-            <span className="block text-sm text-muted">
-              {fmt(t.common.roundN, { n: nightRound.number })} · {plural(nightRound.pairings.length, t.common.boardsN)} ·{" "}
-              {sessionRoundComplete(db, nightRound) ? t.home.allResultsIn : fmt(t.home.stillPlaying, { n: nightPending })}
-            </span>
-          </span>
-          <Icon name="arrow-right" className="h-4 w-4 text-muted" />
-        </Link>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <Section
           title={t.home.rankings}
